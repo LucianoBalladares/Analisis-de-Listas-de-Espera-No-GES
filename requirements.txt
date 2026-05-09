@@ -1,0 +1,17 @@
+# ── Ingesta y base de datos ────────────────────────────────────────
+pandas>=2.0
+openpyxl>=3.1          # lectura de archivos .xlsx
+psycopg2-binary>=2.9   # conector PostgreSQL (incluye binarios, sin compilar)
+python-dotenv>=1.0     # lectura de variables de entorno desde .env
+
+# ── Validación y reporting ─────────────────────────────────────────
+tabulate>=0.9          # formato de tablas en consola
+
+# ── Notas de instalación ───────────────────────────────────────────
+# Crear entorno virtual primero:
+#   python -m venv .venv
+#   source .venv/bin/activate       (Linux/WSL)
+#   .venv\Scripts\activate          (Windows)
+#
+# Instalar dependencias:
+#   pip install -r requirements.txt
