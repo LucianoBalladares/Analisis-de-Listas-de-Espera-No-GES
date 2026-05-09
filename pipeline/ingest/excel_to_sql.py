@@ -16,6 +16,15 @@ Puede contener hasta 3 hojas (ninguna es obligatoria):
 
 La carga es idempotente: re-correr el script con el mismo archivo
 actualiza los registros existentes (UPSERT), nunca duplica.
+
+CORRECCIONES respecto a versión anterior:
+  - clean_numeric: "1.234" (punto como separador de miles) ahora
+    produce correctamente 1234.0, no 1.234.
+  - process_listas_espera: filtra filas de totales/encabezados
+    antes de intentar normalizar ss_id (ej: "Total Nacional").
+  - Nombre de archivo unificado con README y documentación.
+
+Requisitos: Python >= 3.10 (usa sintaxis X | Y para type hints)
 """
 
 import os
@@ -60,8 +69,16 @@ NULL_VALUES = {
     "SIN INFORMACIÓN", "-", "—", "–", "", "NA", "N/A", ".", "..",
 }
 
+# Patrones de filas de totales o encabezados repetidos que deben ignorarse.
+# Los Excel de Glosa 06 frecuentemente incluyen filas "Total", "Total Nacional",
+# "TOTAL PAÍS", etc. al final de cada bloque.
+TOTAL_ROW_PATTERNS = re.compile(
+    r'^\s*(total|subtotal|país|pais|nacional|promedio\s+nacional|promedio\s+país'
+    r'|n\.?\s*a\.?|n/a)\s*$',
+    flags=re.IGNORECASE | re.UNICODE,
+)
+
 # ── Mapeo de columnas Excel → DB ───────────────────────────────────────────────
-# Clave: nombre canónico en DB | Valor: variantes posibles en el Excel (lowercase)
 
 COL_MAP_LISTAS = {
     "ss_id":             ["ss_id", "servicio de salud", "servicio", "ss"],
@@ -114,7 +131,6 @@ TIPO_PRESTACION_MAP = {
     "quirúrgica":                       "IQ",
 }
 
-# Servicios de Salud: clave en lowercase sin prefijo "ss" | valor: nombre estándar
 SS_ID_MAP = {
     "arica":                        "SS Arica",
     "tarapaca":                     "SS Tarapacá",
@@ -190,7 +206,6 @@ def normalize_columns(df: pd.DataFrame, col_map: dict) -> pd.DataFrame:
                 rename[candidate.lower()] = db_col
                 break
     df = df.rename(columns=rename)
-    # Mantener solo columnas que están en el col_map
     known_cols = list(col_map.keys())
     return df[[c for c in known_cols if c in df.columns]]
 
@@ -198,33 +213,51 @@ def normalize_columns(df: pd.DataFrame, col_map: dict) -> pd.DataFrame:
 def clean_numeric(val) -> float | None:
     """
     Convierte un valor a float tolerando formatos numéricos chilenos/europeos.
+
     Ejemplos:
-        "1.234"    → 1234.0   (punto como separador de miles)
-        "1.234,5"  → 1234.5   (formato europeo)
-        "1,234.5"  → 1234.5   (formato anglosajón)
+        "1.234"    → 1234.0   (punto como separador de miles: 3 dígitos tras punto)
+        "1.234,5"  → 1234.5   (formato europeo: punto=miles, coma=decimal)
+        "1,234.5"  → 1234.5   (formato anglosajón: coma=miles, punto=decimal)
+        "365.5"    → 365.5    (decimal normal: menos de 3 dígitos tras punto)
         "N/D"      → None
+
+    CORRECCIÓN: versión anterior no manejaba "1.234" (punto como miles sin coma),
+    produciendo 1.234 en lugar de 1234.0. Ahora se detecta por la regla de
+    3 dígitos exactos tras el punto.
     """
     if pd.isna(val):
         return None
     s = str(val).strip().upper()
     if s in NULL_VALUES:
         return None
-    # Quitar prefijos/sufijos comunes
+
     s = re.sub(r'[%$]', '', s).strip()
     if not s:
         return None
 
     if ',' in s and '.' in s:
-        # Ambos separadores → punto es miles, coma es decimal
+        # Ambos separadores → punto es miles, coma es decimal (formato europeo)
         s = s.replace('.', '').replace(',', '.')
     elif ',' in s:
         parts = s.split(',')
-        # Si hay ≤2 dígitos tras la coma → separador decimal
         if len(parts) == 2 and len(parts[1]) <= 2:
-            s = s.replace(',', '.')
+            s = s.replace(',', '.')   # coma decimal: "365,5" → "365.5"
         else:
-            s = s.replace(',', '')  # separador de miles
-    # Eliminar caracteres no numéricos excepto punto y signo negativo
+            s = s.replace(',', '')    # coma como miles: "1,234" → "1234"
+    elif '.' in s:
+        dot_count = s.count('.')
+        if dot_count > 1:
+            # Múltiples puntos: todos son separadores de miles ("1.234.567")
+            s = s.replace('.', '')
+        else:
+            # Un solo punto: es miles si hay exactamente 3 dígitos tras él
+            # y la parte entera también es numérica.
+            parts = s.split('.')
+            left, right = parts[0].lstrip('-'), parts[1]
+            if left.isdigit() and right.isdigit() and len(right) == 3:
+                s = s.replace('.', '')   # "1.234" → "1234"
+            # else: punto decimal normal ("365.5", "1.2") → dejar como está
+
     s = re.sub(r'[^\d.\-]', '', s)
     if not s or s == '.':
         return None
@@ -232,6 +265,17 @@ def clean_numeric(val) -> float | None:
         return float(s)
     except ValueError:
         return None
+
+
+def is_total_row(val) -> bool:
+    """
+    Detecta filas de totales o subtotales que deben excluirse.
+    Los Excel de Glosa 06 frecuentemente terminan con filas como
+    'Total', 'Total Nacional', 'TOTAL PAÍS', etc.
+    """
+    if pd.isna(val):
+        return False
+    return bool(TOTAL_ROW_PATTERNS.match(str(val).strip()))
 
 
 def normalize_tipo_prestacion(val) -> str | None:
@@ -248,20 +292,24 @@ def normalize_tipo_prestacion(val) -> str | None:
 def normalize_ss_id(val) -> str | None:
     """
     Normaliza el nombre del Servicio de Salud al estándar del proyecto.
-    Si no hay coincidencia exacta, intenta una búsqueda parcial.
-    Si tampoco la hay, retorna el valor original (sin perder el dato).
+    Si no hay coincidencia exacta, intenta búsqueda parcial.
+    Si tampoco la hay, retorna el valor original (fallback; validacion.py
+    lo detectará como fuera de catálogo).
     """
     if pd.isna(val):
         return None
     raw = str(val).strip()
-    # Remover prefijo "ss " y variantes comunes del OCR
+
+    # Rechazar filas de totales antes de intentar normalizar
+    if is_total_row(raw):
+        return None
+
     key = re.sub(r'^s\.?\s*s\.?\s*', '', raw.lower()).strip()
-    key = re.sub(r'\s+', ' ', key)  # normalizar espacios internos
+    key = re.sub(r'\s+', ' ', key)
 
     if key in SS_ID_MAP:
         return SS_ID_MAP[key]
 
-    # Fallback: búsqueda parcial (tolerancia a OCR con caracteres extra)
     for k, v in SS_ID_MAP.items():
         if k in key or key in k:
             log.debug(f"  ss_id '{raw}' → '{v}' (coincidencia parcial)")
@@ -306,6 +354,14 @@ def process_listas_espera(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
                 f"Columnas disponibles: {list(df.columns)}"
             )
 
+    # Filtrar filas de totales ANTES de normalize_ss_id.
+    # Sin este paso, filas como "Total Nacional" pasaban al DB con ss_id inválido.
+    n_pre_filter = len(df)
+    df = df[~df["ss_id"].apply(is_total_row)]
+    n_totales = n_pre_filter - len(df)
+    if n_totales:
+        log.info(f"  {n_totales} fila(s) de totales/encabezados descartadas")
+
     df["ss_id"] = df["ss_id"].apply(normalize_ss_id)
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
 
@@ -317,9 +373,9 @@ def process_listas_espera(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
 
     for col in ("personas_espera", "registros_espera", "mediana_dias",
                 "promedio_dias", "reg_24a36m", "reg_mayor_36m"):
-        df[col] = df[col].apply(clean_numeric) if col in df.columns else None
+        if col in df.columns:
+            df[col] = df[col].apply(clean_numeric)
 
-    # Asimetría: promedio - mediana (None si alguno falta)
     df["asimetria"] = df.apply(
         lambda r: round(r["promedio_dias"] - r["mediana_dias"], 1)
         if pd.notna(r.get("promedio_dias")) and pd.notna(r.get("mediana_dias"))
@@ -386,7 +442,6 @@ def process_nivel_atencion(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
 # ── UPSERT en PostgreSQL ───────────────────────────────────────────────────────
 
 def _to_row(series, cols: list) -> tuple:
-    """Convierte una fila del DataFrame a tupla para psycopg2, mapeando NaN → None."""
     return tuple(
         None if pd.isna(series.get(c)) else series.get(c)
         for c in cols
@@ -457,7 +512,6 @@ def upsert_nivel_atencion(conn, df: pd.DataFrame) -> int:
 def log_pipeline_run(conn, archivo: str, trimestre: str, tabla: str,
                      procesadas: int, cargadas: int, omitidas: int,
                      estado: str, detalle: str = None):
-    """Registra el resultado de cada carga en pipeline_runs."""
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO pipeline_runs

@@ -5,6 +5,12 @@
 --
 -- Ejecución: psql -U <usuario> -d <base> -f sql/schema/constraints.sql
 -- Debe ejecutarse DESPUÉS de create_tables.sql
+--
+-- CORRECCIÓN: eliminada constraint chk_listas_coherencia_antiguedad.
+-- reg_24a36m y reg_mayor_36m son rangos DISJUNTOS (24-36m y >36m
+-- respectivamente). No existe relación de subconjunto entre ellos.
+-- El comentario anterior ("los >36m son subconjunto de los >24m")
+-- era incorrecto: reg_24a36m representa el rango 24-36m, no >24m.
 -- =================================================================
 -- -----------------------------------------------------------------
 -- PRIMARY KEYS
@@ -79,14 +85,6 @@ ALTER TABLE nivel_atencion_trimestre
 ADD CONSTRAINT chk_nivel_positivo CHECK (
         registros_total_nivel IS NULL
         OR registros_total_nivel >= 0
-    );
--- Coherencia: reg_mayor_36m no puede superar reg_24a36m
--- (los >36m son un subconjunto de los >24m)
-ALTER TABLE listas_espera_ss_trimestre
-ADD CONSTRAINT chk_listas_coherencia_antiguedad CHECK (
-        reg_mayor_36m IS NULL
-        OR reg_24a36m IS NULL
-        OR reg_mayor_36m <= reg_24a36m
     );
 -- Estado del pipeline válido
 ALTER TABLE pipeline_runs

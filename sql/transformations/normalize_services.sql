@@ -8,16 +8,22 @@
 -- (el ingester las guarda con el valor original como fallback).
 -- Este script aplica una segunda capa de normalización.
 --
--- Idempotente: después de la primera ejecución exitosa, no hay
+-- Idempotente: después de la primera ejecución exitosa no hay
 -- filas que cumplan las condiciones WHERE, por lo que no hay efecto.
+--
+-- CORRECCIONES:
+--   - Eliminadas entradas no-op de la tabla de correcciones (raw = estándar).
+--   - Eliminado SELECT de diagnóstico final: run_transformations.py
+--     lo ejecuta por separado y lo registra en el log (ver DIAGNOSTIC_QUERY).
 -- =================================================================
 -- -----------------------------------------------------------------
--- 1. Tabla temporal de correcciones conocidas
---    Extender esta lista cuando aparezcan nuevas variantes de OCR.
+-- 1. Tabla temporal de correcciones exactas conocidas
+--    Extender cuando aparezcan nuevas variantes de OCR.
 --    Formato: (valor_en_db, valor_estandar)
+--    NOTA: no incluir filas donde raw = estandar (no-ops).
 -- -----------------------------------------------------------------
 WITH correcciones (raw, estandar) AS (
-    VALUES -- Variantes con prefijo diferente
+    VALUES -- Prefijo largo
         (
             'Servicio de Salud Arica',
             'SS Arica'
@@ -74,7 +80,7 @@ WITH correcciones (raw, estandar) AS (
             'Servicio de Salud Magallanes',
             'SS Magallanes'
         ),
-        -- Variantes compuestas (OCR omite guión o guión largo)
+        -- Compuestos con guión omitido por OCR
         (
             'SS Viña del Mar Quillota',
             'SS Viña del Mar - Quillota'
@@ -103,12 +109,7 @@ WITH correcciones (raw, estandar) AS (
             'Servicio de Salud Valparaíso - San Antonio',
             'SS Valparaíso - San Antonio'
         ),
-        -- Variantes Metropolitano
-        (
-            'SS Metropolitano Norte',
-            'SS Metropolitano Norte'
-        ),
-        -- ya correcto
+        -- Metropolitano (abreviaturas OCR)
         (
             'SSMO Norte',
             'SS Metropolitano Norte'
@@ -161,19 +162,10 @@ WITH correcciones (raw, estandar) AS (
             'Servicio de Salud Metropolitano Sur Oriente',
             'SS Metropolitano Sur Oriente'
         ),
-        -- Variantes del Sur
-        (
-            'SS Araucanía Norte',
-            'SS Araucanía Norte'
-        ),
-        -- ya correcto
+        -- Araucanía
         (
             'SS Araucania Norte',
             'SS Araucanía Norte'
-        ),
-        (
-            'SS Araucanía Sur',
-            'SS Araucanía Sur'
         ),
         (
             'SS Araucania Sur',
@@ -187,7 +179,7 @@ WITH correcciones (raw, estandar) AS (
             'Servicio de Salud Araucanía Sur',
             'SS Araucanía Sur'
         ),
-        -- Biobío / Ñuble / O'Higgins
+        -- Biobío / Ñuble / O''Higgins
         (
             'SS Biobio',
             'SS Biobío'
@@ -244,18 +236,17 @@ WHERE l.ss_id = c.raw
 -- evitar re-procesar los ya correctos
 -- -----------------------------------------------------------------
 -- 2. Normalización por coincidencia parcial (segunda pasada)
---    Para variantes que no están en la tabla de correcciones exactas
---    pero contienen palabras clave únicas.
---    Solo actualiza cuando la coincidencia es inequívoca.
+--    Para variantes no cubiertas por la tabla exacta.
+--    Solo actúa cuando la coincidencia es inequívoca.
 -- -----------------------------------------------------------------
 UPDATE listas_espera_ss_trimestre
 SET ss_id = CASE
         WHEN ss_id ILIKE '%metropolitano norte%' THEN 'SS Metropolitano Norte'
         WHEN ss_id ILIKE '%metropolitano occidente%' THEN 'SS Metropolitano Occidente'
         WHEN ss_id ILIKE '%metropolitano central%' THEN 'SS Metropolitano Central'
+        WHEN ss_id ILIKE '%metropolitano sur oriente%' THEN 'SS Metropolitano Sur Oriente'
         WHEN ss_id ILIKE '%metropolitano oriente%'
         AND ss_id NOT ILIKE '%sur%' THEN 'SS Metropolitano Oriente'
-        WHEN ss_id ILIKE '%metropolitano sur oriente%' THEN 'SS Metropolitano Sur Oriente'
         WHEN ss_id ILIKE '%metropolitano sur%'
         AND ss_id NOT ILIKE '%oriente%' THEN 'SS Metropolitano Sur'
         WHEN ss_id ILIKE '%reloncav%' THEN 'SS Del Reloncaví'
@@ -297,45 +288,15 @@ WHERE ss_id NOT IN (
         'SS Magallanes'
     );
 -- -----------------------------------------------------------------
--- Reporte: ss_id que siguen sin reconocer tras ambas pasadas
--- Un resultado vacío indica normalización completa.
+-- DIAGNOSTIC_QUERY — ejecutada por run_transformations.py
+-- después de este script para registrar ss_id no reconocidos.
+-- NO incluir aquí: el resultado se descartaría silenciosamente.
+--
+-- SELECT ss_id AS ss_id_no_reconocido,
+--        COUNT(*) AS n_registros,
+--        STRING_AGG(DISTINCT trimestre, ', ' ORDER BY trimestre) AS trimestres
+-- FROM listas_espera_ss_trimestre
+-- WHERE ss_id NOT IN ( ... lista canónica ... )
+-- GROUP BY ss_id
+-- ORDER BY n_registros DESC;
 -- -----------------------------------------------------------------
-SELECT ss_id AS ss_id_no_reconocido,
-    COUNT(*) AS n_registros,
-    STRING_AGG(
-        DISTINCT trimestre,
-        ', '
-        ORDER BY trimestre
-    ) AS trimestres
-FROM listas_espera_ss_trimestre
-WHERE ss_id NOT IN (
-        'SS Arica',
-        'SS Tarapacá',
-        'SS Antofagasta',
-        'SS Atacama',
-        'SS Coquimbo',
-        'SS Viña del Mar - Quillota',
-        'SS Valparaíso - San Antonio',
-        'SS Aconcagua',
-        'SS Metropolitano Norte',
-        'SS Metropolitano Occidente',
-        'SS Metropolitano Central',
-        'SS Metropolitano Oriente',
-        'SS Metropolitano Sur',
-        'SS Metropolitano Sur Oriente',
-        'SS O''Higgins',
-        'SS Maule',
-        'SS Ñuble',
-        'SS Biobío',
-        'SS Talcahuano',
-        'SS Araucanía Norte',
-        'SS Araucanía Sur',
-        'SS Valdivia',
-        'SS Osorno',
-        'SS Del Reloncaví',
-        'SS Chiloé',
-        'SS Aysén',
-        'SS Magallanes'
-    )
-GROUP BY ss_id
-ORDER BY n_registros DESC;
