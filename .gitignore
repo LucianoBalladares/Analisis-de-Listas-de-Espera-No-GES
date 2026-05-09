@@ -1,0 +1,82 @@
+# =================================================================
+# .gitignore — Análisis de Listas de Espera NO GES
+# =================================================================
+
+# ── Python ────────────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+dist/
+build/
+.Python
+
+# ── Entorno y secretos ────────────────────────────────────────────
+.env
+# .env.example SÍ se versiona (no tiene credenciales reales)
+
+# ── Logs del pipeline ─────────────────────────────────────────────
+pipeline/logs/
+# Preservar la carpeta vacía en el repo
+!pipeline/logs/.gitkeep
+
+# ── Datos fuente (no versionables: pesados o confidenciales) ──────
+data/raw/
+data/staging/
+
+# Preservar estructura de directorios en el repo
+!data/raw/.gitkeep
+!data/raw/sources/.gitkeep
+!data/staging/.gitkeep
+!data/staging/cleaned_excels/.gitkeep
+
+# Datos procesados (archivos grandes)
+data/processed/*.xlsx
+data/processed/*.csv
+data/processed/export_tables/
+
+# Excepción: la muestra anonimizada sí se versiona
+!data/sample/
+!data/sample/*.csv
+
+# ── Power BI ──────────────────────────────────────────────────────
+# Los .pbix son binarios — no aptos para diff en git
+*.pbix
+*.pbit
+
+# ── PostgreSQL ────────────────────────────────────────────────────
+*.dump
+*.backup
+*.sql.gz
+*.pgdump
+
+# ── Jupyter ───────────────────────────────────────────────────────
+.ipynb_checkpoints/
+# Los notebooks SÍ se versionan, solo se ignoran checkpoints
+
+# ── Reportes generados (binarios) ────────────────────────────────
+reports/*.pdf
+# Los .md de reportes SÍ se versionan
+
+# ── Sistema operativo ─────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ── IDEs ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+
+# ── Temporales ────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.swp
+*.swo
+~$*

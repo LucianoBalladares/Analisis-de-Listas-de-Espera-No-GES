@@ -1,4 +1,5 @@
-# Análisis de recuperación de listas de espera NO GES en Chile  
+# Análisis de recuperación de listas de espera NO GES en Chile
+
 ### Modelamiento de variabilidad entre Servicios de Salud
 
 **Dashboard interactivo en Power BI:** [LINK](https://app.powerbi.com/view?r=eyJrIjoiNDFhZDFlMWYtYzhkMC00NjRjLWIzNzItMGY1MWEyNDUwZmE5IiwidCI6IjZmZDQ4ZjQxLWFmODEtNDVhNS05YzFlLWUzOTkwYmMyN2U3YyIsImMiOjR9)
@@ -30,14 +31,17 @@ El objetivo es generar **evidencia útil para la gestión y gobernanza del siste
 El análisis se estructura en torno a tres dimensiones principales:
 
 ### 1. Recuperación del sistema
+
 - Mediana de días de espera
 - Velocidad de reducción (Δ trimestral de la mediana)
 
 ### 2. Severidad de la espera
+
 - Proporción de casos con antigüedad extrema (>24 y >36 meses)
 - Asimetría de la distribución (cola larga)
 
 ### 3. Estructura de la red
+
 - Concentración de la demanda en nivel terciario.
 
 ---
@@ -45,9 +49,11 @@ El análisis se estructura en torno a tres dimensiones principales:
 ## 4. Fuente de datos
 
 ### Fuente principal:
+
 - **Glosa 06 – Ley de Presupuestos (MINSAL)**
 
 Características:
+
 - Datos oficiales
 - Periodicidad trimestral
 - Nivel de agregación: Servicio de Salud
@@ -85,6 +91,36 @@ Este pipeline prioriza la **trazabilidad y consistencia longitudinal de los dato
 
 ---
 
+### Instruciones de uso
+
+#### 1. Preparar el entorno (una sola vez)
+
+```linux
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+#### 2. Configurar conexión
+
+```
+cp .env.example .env # y editar con tu password
+```
+
+#### 3. Inicializar la base de datos (una sola vez)
+
+```
+psql -U postgres -d listas_espera_ges -f sql/schema/create_tables.sql
+psql -U postgres -d listas_espera_ges -f sql/schema/constraints.sql
+psql -U postgres -d listas_espera_ges -f sql/schema/indexes.sql
+```
+
+#### 4. Ciclo normal cuando llega un nuevo Excel
+
+```
+python pipeline/ingest/excel_a_sql.py data/staging/cleaned_excels/2024_T4.xlsx
+python pipeline/ingest/validacion.py 2024_T4
+```
+
 ## 6. Dataset
 
 ### Dataset maestro
@@ -93,20 +129,22 @@ Archivo:
 `data/processed/Master_Dataset.xlsx`
 
 ### Unidad de análisis:
+
 - Servicio de Salud × Trimestre × Tipo de prestación
 
 ### Tipos de prestación:
+
 - Consulta Nueva de Especialidad (CNE)
 - Intervención Quirúrgica
 
 ### Variables principales:
 
-- `mediana_dias` → Mediana de días de espera  
-- `personas_espera` → Número de personas en lista activa  
-- `registros_espera` → Número de registros totales  
-- `pct_mayor_24m` / `pct_mayor_36m` → Antigüedad extrema  
-- `pct_nivel_terciario` → Concentración en nivel terciario  
-- `asimetria` → Diferencia entre promedio y mediana  
+- `mediana_dias` → Mediana de días de espera
+- `personas_espera` → Número de personas en lista activa
+- `registros_espera` → Número de registros totales
+- `pct_mayor_24m` / `pct_mayor_36m` → Antigüedad extrema
+- `pct_nivel_terciario` → Concentración en nivel terciario
+- `asimetria` → Diferencia entre promedio y mediana
 
 📄 Ver detalle completo en:  
 `docs/diccionario_variables.md`
@@ -137,6 +175,7 @@ El dashboard permite:
 - Disponibilidad variable de indicadores según tipo de prestación
 
 Estas limitaciones son abordadas mediante:
+
 - Validación manual
 - Transparencia metodológica
 - Definición explícita de supuestos analíticos
@@ -168,7 +207,7 @@ Este proyecto aporta:
 ## 10. Autor
 
 **Luciano Balladares**  
-Tecnólogo Médico | Especialización en Informática en Salud  
+Tecnólogo Médico | Especialización en Informática en Salud
 
 - LinkedIn: [LINK](https://www.linkedin.com/in/luciano-balladares/)
 - Email: [LINK](l.garridoballadares@uandresbello.edu)
@@ -179,5 +218,7 @@ Tecnólogo Médico | Especialización en Informática en Salud
 
 Este repositorio utiliza datos públicos provenientes de fuentes oficiales del Estado de Chile (MINSAL).  
 El uso del dataset reconstruido debe citar la fuente original.
+
+```
 
 ```
