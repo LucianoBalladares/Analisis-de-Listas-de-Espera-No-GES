@@ -212,52 +212,47 @@ def normalize_columns(df: pd.DataFrame, col_map: dict) -> pd.DataFrame:
 
 def clean_numeric(val) -> float | None:
     """
-    Convierte un valor a float tolerando formatos numéricos chilenos/europeos.
+    Convierte un valor a float tolerando formatos numéricos post-OCR.
 
-    Ejemplos:
-        "1.234"    → 1234.0   (punto como separador de miles: 3 dígitos tras punto)
-        "1.234,5"  → 1234.5   (formato europeo: punto=miles, coma=decimal)
-        "1,234.5"  → 1234.5   (formato anglosajón: coma=miles, punto=decimal)
-        "365.5"    → 365.5    (decimal normal: menos de 3 dígitos tras punto)
-        "N/D"      → None
+    Convención del proyecto: los archivos Excel procesados NO usan punto
+    como separador de miles (instrucción explícita del proceso OCR).
+    Los números enteros llegan sin separador: "1115210", "348", etc.
 
-    CORRECCIÓN: versión anterior no manejaba "1.234" (punto como miles sin coma),
-    produciendo 1.234 en lugar de 1234.0. Ahora se detecta por la regla de
-    3 dígitos exactos tras el punto.
+    Formatos manejados:
+        "1234"      → 1234.0   (entero sin separador)
+        "1234,5"    → 1234.5   (decimal con coma — formato europeo/chileno)
+        "1234.5"    → 1234.5   (decimal con punto — formato anglosajón)
+        "1.234,5"   → 1234.5   (miles con punto, decimal con coma)
+        "1,234.5"   → 1234.5   (miles con coma, decimal con punto)
+        "N/D", "-"  → None     (valores no disponibles)
+        ""          → None
+
+    Nota: el caso "1.234" (punto como separador de miles sin coma decimal)
+    NO se maneja intencionalmente, ya que el proceso OCR garantiza que los
+    números no llevan punto como separador de miles. Si un valor de ese tipo
+    apareciera, se interpretaría como 1.234 (decimal), lo que generaría un
+    warning en validacion.py por ser un valor fuera de rango esperado.
     """
     if pd.isna(val):
         return None
     s = str(val).strip().upper()
     if s in NULL_VALUES:
         return None
-
     s = re.sub(r'[%$]', '', s).strip()
     if not s:
         return None
 
     if ',' in s and '.' in s:
-        # Ambos separadores → punto es miles, coma es decimal (formato europeo)
+        # Ambos separadores presentes → punto es miles, coma es decimal
         s = s.replace('.', '').replace(',', '.')
     elif ',' in s:
         parts = s.split(',')
+        # ≤2 dígitos tras la coma → separador decimal
         if len(parts) == 2 and len(parts[1]) <= 2:
-            s = s.replace(',', '.')   # coma decimal: "365,5" → "365.5"
+            s = s.replace(',', '.')
         else:
-            s = s.replace(',', '')    # coma como miles: "1,234" → "1234"
-    elif '.' in s:
-        dot_count = s.count('.')
-        if dot_count > 1:
-            # Múltiples puntos: todos son separadores de miles ("1.234.567")
-            s = s.replace('.', '')
-        else:
-            # Un solo punto: es miles si hay exactamente 3 dígitos tras él
-            # y la parte entera también es numérica.
-            parts = s.split('.')
-            left, right = parts[0].lstrip('-'), parts[1]
-            if left.isdigit() and right.isdigit() and len(right) == 3:
-                s = s.replace('.', '')   # "1.234" → "1234"
-            # else: punto decimal normal ("365.5", "1.2") → dejar como está
-
+            s = s.replace(',', '')  # separador de miles
+    # Eliminar caracteres no numéricos excepto punto y signo negativo
     s = re.sub(r'[^\d.\-]', '', s)
     if not s or s == '.':
         return None

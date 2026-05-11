@@ -6,9 +6,6 @@
 --
 -- Requisitos: PostgreSQL >= 12
 -- Ejecución : psql -U <usuario> -d <base> -f sql/schema/create_tables.sql
---
--- CORRECCIÓN: archivo anterior contenía las definiciones triplicadas
--- y el bloque pipeline_runs estaba incompleto/anidado. Corregido.
 -- =================================================================
 -- -----------------------------------------------------------------
 -- Tabla 1: listas_espera_ss_trimestre
@@ -29,12 +26,11 @@ CREATE TABLE IF NOT EXISTS listas_espera_ss_trimestre (
     promedio_dias NUMERIC(8, 1),
     asimetria NUMERIC(8, 1),
     -- Calculada en ingesta: promedio - mediana
-    -- Antigüedad extrema por rango disjunto
-    -- reg_24a36m : registros con 24–36 meses de espera  (rango 24-36m)
-    -- reg_mayor_36m: registros con >36 meses de espera  (rango >36m)
-    -- Ambos son rangos independientes; su suma = total >24m
+    -- Antigüedad extrema (tramos independientes, calculados en registros)
     reg_24a36m NUMERIC(10, 0),
+    -- Registros con 24–36 meses de espera
     reg_mayor_36m NUMERIC(10, 0),
+    -- Registros con >36 meses de espera
     -- Trazabilidad
     fuente TEXT,
     observaciones TEXT,

@@ -81,35 +81,15 @@ Incluye variables de resultado, variables estructurales y variables de control, 
   - Complementa la mediana.
   - Permite evaluar asimetría de la distribución.
 
----
-
-### 3.3 `velocidad_recuperacion` *(variable derivada)*
-
-- **Definición:** Cambio en la mediana de días de espera entre trimestres consecutivos.
-- **Tipo:** Numérica continua
-- **Cálculo:**
-
-  velocidad = mediana(t) – mediana(t-1)
-
-- **Interpretación:**
-  - Valores negativos → reducción de la espera (mejor desempeño)
-  - Valores positivos → aumento de la espera
-- **Notas:**
-  - No forma parte del dataset crudo.
-  - Se calcula en Power BI o herramientas analíticas.
-
----
-
 ### 3.4 `pct_mayor_24m`
 
 - **Definición:** Porcentaje de registros con tiempo de espera superior a 24 meses.
-- **Tipo:** Numérica continua
-- **Unidad:** Porcentaje (0–100)
-- **Fuente:** Glosa 06 (tramos de antigüedad)
-- **Interpretación:**
-  - Proxy de riesgo sanitario acumulado.
-- **Limitaciones:**
-  - No disponible en todos los periodos.
+- **Cálculo en vista:** `(reg_24a36m + reg_mayor_36m) / registros_espera × 100`
+- **Nota importante:** `reg_24a36m` y `reg_mayor_36m` son **tramos mutuamente excluyentes**:
+  - `reg_24a36m` → registros con entre 24 y 36 meses de espera (exclusive)
+  - `reg_mayor_36m` → registros con más de 36 meses de espera
+  - La suma de ambos representa el total de registros con más de 24 meses.
+  - No existe relación de orden obligatoria entre los dos tramos por separado.
 
 ---
 
@@ -220,7 +200,7 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 Para comprender completamente el dataset, se recomienda revisar:
 
-- `docs/metodologia.md` → diseño del estudio y estrategia analítica  
-- `docs/limitaciones.md` → disponibilidad de datos por periodo  
+- `docs/metodologia.md` → diseño del estudio y estrategia analítica
+- `docs/limitaciones.md` → disponibilidad de datos por periodo
 
 ---

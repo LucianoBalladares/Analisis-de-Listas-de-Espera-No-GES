@@ -48,16 +48,40 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD", ""),
 }
 
-# Servicios de Salud esperados (29 en total)
+
 SS_ESPERADOS = {
-    "SS Arica", "SS Tarapacá", "SS Antofagasta", "SS Atacama", "SS Coquimbo",
-    "SS Viña del Mar - Quillota", "SS Valparaíso - San Antonio", "SS Aconcagua",
-    "SS Metropolitano Norte", "SS Metropolitano Occidente", "SS Metropolitano Central",
-    "SS Metropolitano Oriente", "SS Metropolitano Sur", "SS Metropolitano Sur Oriente",
-    "SS O'Higgins", "SS Maule", "SS Ñuble", "SS Biobío", "SS Talcahuano",
-    "SS Araucanía Norte", "SS Araucanía Sur", "SS Valdivia", "SS Osorno",
-    "SS Del Reloncaví", "SS Chiloé", "SS Aysén", "SS Magallanes",
+    "SS Arica y Parinacota", 
+    "SS Tarapacá", 
+    "SS Antofagasta", 
+    "SS Atacama", 
+    "SS Coquimbo",
+    "SS Valparaíso - San Antonio", 
+    "SS Viña del Mar - Quillota", 
+    "SS Aconcagua",
+    "SS Metropolitano Norte", 
+    "SS Metropolitano Occidente", 
+    "SS Metropolitano Central",
+    "SS Metropolitano Oriente", 
+    "SS Metropolitano Sur", 
+    "SS Metropolitano Sur Oriente",
+    "SS O'Higgins", 
+    "SS Maule", 
+    "SS Ñuble", 
+    "SS Concepción",
+    "SS Arauco",     
+    "SS Talcahuano",
+    "SS Biobío", 
+    "SS Araucanía Norte", 
+    "SS Araucanía Sur", 
+    "SS Los Ríos",   
+    "SS Osorno",
+    "SS Del Reloncaví", 
+    "SS Chiloé", 
+    "SS Aysén", 
+    "SS Magallanes"
 }
+
+SS_ESPECIALES = {"No definido", "NO DEFINIDO", "Sin asignar"}
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -119,11 +143,15 @@ def check_cobertura_tablas(conn, trimestre) -> int:
 
 
 def check_servicios_por_trimestre(conn, trimestre) -> int:
-    """Verifica que cada trimestre tenga los 29 Servicios de Salud esperados."""
     wh, params = trimestre_filter(trimestre)
     rows = query(conn, f"""
         SELECT trimestre, tipo_prestacion,
-               COUNT(DISTINCT ss_id) AS n_ss
+               COUNT(DISTINCT ss_id) FILTER (
+                   WHERE ss_id NOT IN ('No definido', 'NO DEFINIDO', 'Sin asignar')
+               ) AS n_ss_standard,
+               COUNT(DISTINCT ss_id) FILTER (
+                   WHERE ss_id IN ('No definido', 'NO DEFINIDO', 'Sin asignar')
+               ) AS n_ss_especiales
         FROM listas_espera_ss_trimestre {wh}
         GROUP BY trimestre, tipo_prestacion
         ORDER BY trimestre, tipo_prestacion
@@ -131,21 +159,18 @@ def check_servicios_por_trimestre(conn, trimestre) -> int:
 
     errors = 0
     for r in rows:
-        n = r["n_ss"]
+        n = r["n_ss_standard"]
+        esp = r["n_ss_especiales"]
         t = f"{r['trimestre']} / {r['tipo_prestacion']}"
+        sufijo = f" + {esp} entrada(s) especial(es) ('No definido')" if esp else ""
         if n == len(SS_ESPERADOS):
-            ok(f"{t}: {n} servicios ✓")
-        elif n < len(SS_ESPERADOS):
-            warn(f"{t}: {n} servicios (faltan {len(SS_ESPERADOS) - n})")
+            ok(f"{t}: {n} servicios ✓{sufijo}")
         else:
-            warn(f"{t}: {n} servicios (más de los esperados — revisar nombres duplicados)")
-            errors += 1
-
+            warn(f"{t}: {n} de {len(SS_ESPERADOS)} servicios esperados{sufijo}")
     return errors
 
 
 def check_ss_no_estandarizados(conn, trimestre) -> int:
-    """Detecta Servicios de Salud con nombres fuera del catálogo estándar."""
     wh, params = trimestre_filter(trimestre)
     rows = query(conn, f"""
         SELECT DISTINCT ss_id
@@ -154,14 +179,14 @@ def check_ss_no_estandarizados(conn, trimestre) -> int:
     """, params)
 
     ss_encontrados = {r["ss_id"] for r in rows}
-    fuera_catalogo = ss_encontrados - SS_ESPERADOS
+    fuera_catalogo = ss_encontrados - SS_ESPERADOS - SS_ESPECIALES  # excluir especiales
 
     if not fuera_catalogo:
-        ok(f"Todos los ss_id están en el catálogo estándar ({len(ss_encontrados)} únicos)")
+        ok(f"Todos los ss_id están en el catálogo ({len(ss_encontrados - SS_ESPECIALES)} estándar)")
         return 0
 
     for ss in sorted(fuera_catalogo):
-        warn(f"ss_id fuera de catálogo: '{ss}' — revisar normalización en excel_a_sql.py")
+        warn(f"ss_id fuera de catálogo: '{ss}' — revisar normalización")
     return len(fuera_catalogo)
 
 

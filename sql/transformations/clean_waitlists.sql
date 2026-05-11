@@ -61,22 +61,21 @@ WHERE promedio_dias IS NOT NULL
         asimetria - ROUND(promedio_dias - mediana_dias, 1)
     ) > 1.0;
 -- -----------------------------------------------------------------
--- 5. Detectar y marcar registros con incoherencia de antigüedad
---    La DB constraint ya previene que reg_mayor_36m > reg_24a36m,
---    pero si ambos son NULL no hay constraint. Aquí marcamos los
---    casos donde reg_24a36m = 0 pero reg_mayor_36m > 0, que es
---    matemáticamente imposible.
+-- 5. Detectar y marcar registros donde la suma de tramos de
+--    antigüedad supera los registros totales (incoherencia real).
+--    reg_24a36m y reg_mayor_36m son tramos independientes (exclusivos):
+--    24–36m y >36m respectivamente. No hay relación de orden entre ellos.
 -- -----------------------------------------------------------------
 UPDATE listas_espera_ss_trimestre
-SET observaciones = COALESCE(observaciones || ' | ', '') || 'ALERTA: incoherencia en tramos de antiguedad',
+SET observaciones = COALESCE(observaciones || ' | ', '') || 'ALERTA: suma de tramos de antigüedad supera registros_espera',
     updated_at = NOW()
 WHERE reg_24a36m IS NOT NULL
     AND reg_mayor_36m IS NOT NULL
-    AND reg_24a36m = 0
-    AND reg_mayor_36m > 0
+    AND registros_espera IS NOT NULL
+    AND (reg_24a36m + reg_mayor_36m) > registros_espera
     AND (
         observaciones IS NULL
-        OR observaciones NOT LIKE '%incoherencia en tramos%'
+        OR observaciones NOT LIKE '%suma de tramos%'
     );
 -- -----------------------------------------------------------------
 -- Reporte de estado post-transformación
