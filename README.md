@@ -129,11 +129,6 @@ python pipeline/transform/run_transformations.py --trimestre 2024_T4
 
 ## 7. Dataset
 
-### Dataset maestro
-
-Archivo:
-`data/processed/Master_Dataset.xlsx`
-
 ### Unidad de análisis:
 
 - Servicio de Salud × Trimestre × Tipo de prestación
