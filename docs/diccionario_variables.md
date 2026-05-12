@@ -25,7 +25,7 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 - **Nivel:** Servicio de Salud
 - **Notas:**
   - Se utiliza como clave principal para análisis comparativo.
-  - Debe estar estandarizado (sin variaciones de nombre).
+  - Nombre estandarizado según catálogo vigente de 29 Servicios de Salud.
 
 ---
 
@@ -47,10 +47,9 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 - **Tipo:** Categórica nominal
 - **Categorías:**
   - `CNE` (Consulta Nueva de Especialidad)
-  - `Cirugia` (Intervención Quirúrgica)
+  - `IQ` (Intervención Quirúrgica)
 - **Fuente:** Glosa 06
 - **Notas:**
-  - Permite segmentar el análisis por tipo de atención.
   - Las variables disponibles pueden diferir entre categorías.
 
 ---
@@ -81,15 +80,32 @@ Incluye variables de resultado, variables estructurales y variables de control, 
   - Complementa la mediana.
   - Permite evaluar asimetría de la distribución.
 
+---
+
+### 3.3 `asimetria`
+
+- **Definición:** Diferencia entre promedio y mediana de días de espera.
+- **Tipo:** Numérica continua
+- **Cálculo:**
+
+  asimetria = promedio_dias – mediana_dias
+
+- **Interpretación:**
+  - Valores altos → presencia de cola larga en la distribución de esperas.
+  - Valores cercanos a 0 → distribución más simétrica.
+- **Rol:**
+  - Proxy de dispersión de tiempos de espera a nivel de Servicio de Salud.
+
+---
+
 ### 3.4 `pct_mayor_24m`
 
 - **Definición:** Porcentaje de registros con tiempo de espera superior a 24 meses.
 - **Cálculo en vista:** `(reg_24a36m + reg_mayor_36m) / registros_espera × 100`
 - **Nota importante:** `reg_24a36m` y `reg_mayor_36m` son **tramos mutuamente excluyentes**:
-  - `reg_24a36m` → registros con entre 24 y 36 meses de espera (exclusive)
+  - `reg_24a36m` → registros con entre 24 y 36 meses de espera
   - `reg_mayor_36m` → registros con más de 36 meses de espera
   - La suma de ambos representa el total de registros con más de 24 meses.
-  - No existe relación de orden obligatoria entre los dos tramos por separado.
 
 ---
 
@@ -102,7 +118,7 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 - **Interpretación:**
   - Indicador de casos extremos (cola larga severa).
 - **Limitaciones:**
-  - Disponibilidad variable entre años.
+  - Disponibilidad variable entre años (ver `limitaciones.md`).
 
 ---
 
@@ -110,15 +126,16 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 ### 4.1 `pct_nivel_terciario`
 
-- **Definición:** Proporción de la demanda en lista de espera concentrada en establecimientos de nivel terciario.
+- **Definición:** Proporción de la demanda registrada en establecimientos de nivel terciario, sobre el total nacional de registros del período.
 - **Tipo:** Numérica continua
 - **Unidad:** Porcentaje (0–100)
-- **Fuente:** Glosa 06 (distribución por nivel de atención)
+- **Fuente:** Glosa 06 (distribución por nivel de atención), tabla `nivel_atencion_trimestre`
+- **Disponible en:** vista `v_pct_nivel_terciario` (calculada a nivel nacional por trimestre y tipo de prestación)
 - **Interpretación:**
   - Proxy de **fragmentación funcional de la red asistencial**.
-  - Valores altos sugieren sobrecarga del nivel de alta complejidad.
+  - Valores altos sugieren sobrecarga del nivel de alta complejidad y menor resolución en niveles secundarios.
 - **Limitaciones:**
-  - En algunos periodos solo disponible a nivel nacional.
+  - Disponible principalmente a nivel nacional. No hay desagregación por Servicio de Salud en la mayoría de los periodos (ver `limitaciones.md`).
 
 ---
 
@@ -143,23 +160,7 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 - **Interpretación:**
   - Puede diferir de personas por duplicidad de registros.
 - **Uso:**
-  - Análisis complementario del volumen.
-
----
-
-### 5.3 `asimetria`
-
-- **Definición:** Diferencia entre promedio y mediana de días de espera.
-- **Tipo:** Numérica continua
-- **Cálculo:**
-
-  asimetria = promedio_dias – mediana_dias
-
-- **Interpretación:**
-  - Valores altos → presencia de cola larga
-  - Valores cercanos a 0 → distribución más simétrica
-- **Rol:**
-  - Proxy de dispersión de tiempos de espera.
+  - Análisis complementario del volumen y denominador para cálculos de antigüedad.
 
 ---
 
@@ -169,11 +170,8 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 - **Definición:** Origen del dato.
 - **Tipo:** Texto
-- **Valores posibles:**
-  - "Glosa 06"
-  - "SIGTE" (si aplica en futuras versiones)
-- **Uso:**
-  - Trazabilidad del dato.
+- **Valores posibles:** "Glosa 06"
+- **Uso:** Trazabilidad del dato.
 
 ---
 
@@ -183,6 +181,7 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 - **Tipo:** Texto
 - **Uso:**
   - Documentación de excepciones.
+  - Registro de alertas generadas automáticamente por el pipeline.
   - Registro de decisiones metodológicas específicas.
 
 ---
@@ -202,5 +201,3 @@ Para comprender completamente el dataset, se recomienda revisar:
 
 - `docs/metodologia.md` → diseño del estudio y estrategia analítica
 - `docs/limitaciones.md` → disponibilidad de datos por periodo
-
----

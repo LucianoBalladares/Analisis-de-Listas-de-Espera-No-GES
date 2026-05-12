@@ -17,13 +17,6 @@ Puede contener hasta 3 hojas (ninguna es obligatoria):
 La carga es idempotente: re-correr el script con el mismo archivo
 actualiza los registros existentes (UPSERT), nunca duplica.
 
-CORRECCIONES respecto a versión anterior:
-  - clean_numeric: "1.234" (punto como separador de miles) ahora
-    produce correctamente 1234.0, no 1.234.
-  - process_listas_espera: filtra filas de totales/encabezados
-    antes de intentar normalizar ss_id (ej: "Total Nacional").
-  - Nombre de archivo unificado con README y documentación.
-
 Requisitos: Python >= 3.10 (usa sintaxis X | Y para type hints)
 """
 
@@ -70,8 +63,6 @@ NULL_VALUES = {
 }
 
 # Patrones de filas de totales o encabezados repetidos que deben ignorarse.
-# Los Excel de Glosa 06 frecuentemente incluyen filas "Total", "Total Nacional",
-# "TOTAL PAÍS", etc. al final de cada bloque.
 TOTAL_ROW_PATTERNS = re.compile(
     r'^\s*(total|subtotal|país|pais|nacional|promedio\s+nacional|promedio\s+país'
     r'|n\.?\s*a\.?|n/a)\s*$',
@@ -131,58 +122,76 @@ TIPO_PRESTACION_MAP = {
     "quirúrgica":                       "IQ",
 }
 
+# Catálogo vigente de 29 Servicios de Salud.
+# Cambios históricos cubiertos:
+#   Arica / SS Arica          → SS Arica y Parinacota
+#   Iquique / SS Iquique       → SS Tarapacá
+#   Valdivia / SS Valdivia     → SS Los Ríos
 SS_ID_MAP = {
-    "arica":                        "SS Arica",
-    "tarapaca":                     "SS Tarapacá",
-    "tarapacá":                     "SS Tarapacá",
-    "antofagasta":                  "SS Antofagasta",
-    "atacama":                      "SS Atacama",
-    "coquimbo":                     "SS Coquimbo",
-    "viña del mar quillota":        "SS Viña del Mar - Quillota",
-    "viña del mar - quillota":      "SS Viña del Mar - Quillota",
-    "vina del mar quillota":        "SS Viña del Mar - Quillota",
-    "valparaiso san antonio":       "SS Valparaíso - San Antonio",
-    "valparaíso san antonio":       "SS Valparaíso - San Antonio",
-    "valparaíso - san antonio":     "SS Valparaíso - San Antonio",
-    "aconcagua":                    "SS Aconcagua",
-    "metropolitano norte":          "SS Metropolitano Norte",
-    "metropolitano occidente":      "SS Metropolitano Occidente",
-    "metropolitano central":        "SS Metropolitano Central",
-    "metropolitano oriente":        "SS Metropolitano Oriente",
-    "metropolitano sur":            "SS Metropolitano Sur",
-    "metropolitano sur oriente":    "SS Metropolitano Sur Oriente",
-    "o'higgins":                    "SS O'Higgins",
-    "ohiggins":                     "SS O'Higgins",
-    "maule":                        "SS Maule",
-    "ñuble":                        "SS Ñuble",
-    "nuble":                        "SS Ñuble",
-    "biobio":                       "SS Biobío",
-    "biobío":                       "SS Biobío",
-    "talcahuano":                   "SS Talcahuano",
-    "araucania norte":              "SS Araucanía Norte",
-    "araucanía norte":              "SS Araucanía Norte",
-    "araucania sur":                "SS Araucanía Sur",
-    "araucanía sur":                "SS Araucanía Sur",
-    "valdivia":                     "SS Valdivia",
-    "osorno":                       "SS Osorno",
-    "del reloncavi":                "SS Del Reloncaví",
-    "del reloncaví":                "SS Del Reloncaví",
-    "reloncavi":                    "SS Del Reloncaví",
-    "reloncaví":                    "SS Del Reloncaví",
-    "chiloe":                       "SS Chiloé",
-    "chiloé":                       "SS Chiloé",
-    "aysen":                        "SS Aysén",
-    "aysén":                        "SS Aysén",
-    "magallanes":                   "SS Magallanes",
+    # ── Extremo Norte ──────────────────────────────────────────────
+    "arica":                            "SS Arica y Parinacota",
+    "arica y parinacota":               "SS Arica y Parinacota",
+    "ss arica":                         "SS Arica y Parinacota",   # nombre anterior
+    "iquique":                          "SS Tarapacá",             # nombre anterior
+    "tarapaca":                         "SS Tarapacá",
+    "tarapacá":                         "SS Tarapacá",
+    # ── Norte ──────────────────────────────────────────────────────
+    "antofagasta":                      "SS Antofagasta",
+    "atacama":                          "SS Atacama",
+    "coquimbo":                         "SS Coquimbo",
+    # ── Centro-Norte ───────────────────────────────────────────────
+    "viña del mar quillota":            "SS Viña del Mar - Quillota",
+    "viña del mar - quillota":          "SS Viña del Mar - Quillota",
+    "vina del mar quillota":            "SS Viña del Mar - Quillota",
+    "valparaiso san antonio":           "SS Valparaíso - San Antonio",
+    "valparaíso san antonio":           "SS Valparaíso - San Antonio",
+    "valparaíso - san antonio":         "SS Valparaíso - San Antonio",
+    "aconcagua":                        "SS Aconcagua",
+    # ── Metropolitana ──────────────────────────────────────────────
+    "metropolitano norte":              "SS Metropolitano Norte",
+    "metropolitano occidente":          "SS Metropolitano Occidente",
+    "metropolitano central":            "SS Metropolitano Central",
+    "metropolitano oriente":            "SS Metropolitano Oriente",
+    "metropolitano sur":                "SS Metropolitano Sur",
+    "metropolitano sur oriente":        "SS Metropolitano Sur Oriente",
+    # ── Centro-Sur ─────────────────────────────────────────────────
+    "o'higgins":                        "SS O'Higgins",
+    "ohiggins":                         "SS O'Higgins",
+    "maule":                            "SS Maule",
+    "ñuble":                            "SS Ñuble",
+    "nuble":                            "SS Ñuble",
+    # ── Biobío ─────────────────────────────────────────────────────
+    "concepcion":                       "SS Concepción",
+    "concepción":                       "SS Concepción",
+    "arauco":                           "SS Arauco",
+    "talcahuano":                       "SS Talcahuano",
+    "biobio":                           "SS Biobío",
+    "biobío":                           "SS Biobío",
+    # ── Araucanía ──────────────────────────────────────────────────
+    "araucania norte":                  "SS Araucanía Norte",
+    "araucanía norte":                  "SS Araucanía Norte",
+    "araucania sur":                    "SS Araucanía Sur",
+    "araucanía sur":                    "SS Araucanía Sur",
+    # ── Sur ────────────────────────────────────────────────────────
+    "valdivia":                         "SS Los Ríos",             # nombre anterior
+    "los rios":                         "SS Los Ríos",
+    "los ríos":                         "SS Los Ríos",
+    "osorno":                           "SS Osorno",
+    "del reloncavi":                    "SS Del Reloncaví",
+    "del reloncaví":                    "SS Del Reloncaví",
+    "reloncavi":                        "SS Del Reloncaví",
+    "reloncaví":                        "SS Del Reloncaví",
+    "chiloe":                           "SS Chiloé",
+    "chiloé":                           "SS Chiloé",
+    # ── Austral ────────────────────────────────────────────────────
+    "aysen":                            "SS Aysén",
+    "aysén":                            "SS Aysén",
+    "magallanes":                       "SS Magallanes",
 }
 
 # ── Funciones auxiliares ───────────────────────────────────────────────────────
 
 def parse_trimestre(filepath: Path) -> str:
-    """
-    Extrae el período del nombre del archivo.
-    Acepta variantes como: 2024_T1.xlsx, datos_2024_T2_v2.xlsx
-    """
     match = re.search(r'(\d{4}_T[1-4])', filepath.stem, re.IGNORECASE)
     if not match:
         raise ValueError(
@@ -193,10 +202,6 @@ def parse_trimestre(filepath: Path) -> str:
 
 
 def normalize_columns(df: pd.DataFrame, col_map: dict) -> pd.DataFrame:
-    """
-    Renombra columnas del DataFrame usando el mapa de equivalencias.
-    La comparación es case-insensitive y tolera espacios extra.
-    """
     df = df.copy()
     df.columns = [str(c).strip().lower() for c in df.columns]
     rename = {}
@@ -214,10 +219,6 @@ def clean_numeric(val) -> float | None:
     """
     Convierte un valor a float tolerando formatos numéricos post-OCR.
 
-    Convención del proyecto: los archivos Excel procesados NO usan punto
-    como separador de miles (instrucción explícita del proceso OCR).
-    Los números enteros llegan sin separador: "1115210", "348", etc.
-
     Formatos manejados:
         "1234"      → 1234.0   (entero sin separador)
         "1234,5"    → 1234.5   (decimal con coma — formato europeo/chileno)
@@ -226,12 +227,6 @@ def clean_numeric(val) -> float | None:
         "1,234.5"   → 1234.5   (miles con coma, decimal con punto)
         "N/D", "-"  → None     (valores no disponibles)
         ""          → None
-
-    Nota: el caso "1.234" (punto como separador de miles sin coma decimal)
-    NO se maneja intencionalmente, ya que el proceso OCR garantiza que los
-    números no llevan punto como separador de miles. Si un valor de ese tipo
-    apareciera, se interpretaría como 1.234 (decimal), lo que generaría un
-    warning en validacion.py por ser un valor fuera de rango esperado.
     """
     if pd.isna(val):
         return None
@@ -243,16 +238,13 @@ def clean_numeric(val) -> float | None:
         return None
 
     if ',' in s and '.' in s:
-        # Ambos separadores presentes → punto es miles, coma es decimal
         s = s.replace('.', '').replace(',', '.')
     elif ',' in s:
         parts = s.split(',')
-        # ≤2 dígitos tras la coma → separador decimal
         if len(parts) == 2 and len(parts[1]) <= 2:
             s = s.replace(',', '.')
         else:
-            s = s.replace(',', '')  # separador de miles
-    # Eliminar caracteres no numéricos excepto punto y signo negativo
+            s = s.replace(',', '')
     s = re.sub(r'[^\d.\-]', '', s)
     if not s or s == '.':
         return None
@@ -263,18 +255,12 @@ def clean_numeric(val) -> float | None:
 
 
 def is_total_row(val) -> bool:
-    """
-    Detecta filas de totales o subtotales que deben excluirse.
-    Los Excel de Glosa 06 frecuentemente terminan con filas como
-    'Total', 'Total Nacional', 'TOTAL PAÍS', etc.
-    """
     if pd.isna(val):
         return False
     return bool(TOTAL_ROW_PATTERNS.match(str(val).strip()))
 
 
 def normalize_tipo_prestacion(val) -> str | None:
-    """Normaliza el tipo de prestación a 'CNE' o 'IQ'."""
     if pd.isna(val) or str(val).strip().upper() in NULL_VALUES:
         return None
     key = str(val).strip().lower()
@@ -286,25 +272,25 @@ def normalize_tipo_prestacion(val) -> str | None:
 
 def normalize_ss_id(val) -> str | None:
     """
-    Normaliza el nombre del Servicio de Salud al estándar del proyecto.
-    Si no hay coincidencia exacta, intenta búsqueda parcial.
-    Si tampoco la hay, retorna el valor original (fallback; validacion.py
-    lo detectará como fuera de catálogo).
+    Normaliza el nombre del Servicio de Salud al estándar vigente (29 SS).
+    Cubre nombres históricos (Arica, Iquique, Valdivia) y variantes de OCR.
     """
     if pd.isna(val):
         return None
     raw = str(val).strip()
 
-    # Rechazar filas de totales antes de intentar normalizar
     if is_total_row(raw):
         return None
 
-    key = re.sub(r'^s\.?\s*s\.?\s*', '', raw.lower()).strip()
+    # Quitar prefijo "S.S." / "SS " / "Servicio de Salud " para normalizar la clave
+    key = re.sub(r'^servicio\s+de\s+salud\s+', '', raw.lower()).strip()
+    key = re.sub(r'^s\.?\s*s\.?\s*', '', key).strip()
     key = re.sub(r'\s+', ' ', key)
 
     if key in SS_ID_MAP:
         return SS_ID_MAP[key]
 
+    # Búsqueda parcial como fallback
     for k, v in SS_ID_MAP.items():
         if k in key or key in k:
             log.debug(f"  ss_id '{raw}' → '{v}' (coincidencia parcial)")
@@ -315,10 +301,6 @@ def normalize_ss_id(val) -> str | None:
 
 
 def read_sheet(xl: pd.ExcelFile, sheet_name: str) -> pd.DataFrame | None:
-    """
-    Lee una hoja del Excel con matching case-insensitive.
-    Retorna None si no existe o está vacía.
-    """
     sheet_map = {s.strip().lower(): s for s in xl.sheet_names}
     actual_name = sheet_map.get(sheet_name.lower())
 
@@ -338,8 +320,17 @@ def read_sheet(xl: pd.ExcelFile, sheet_name: str) -> pd.DataFrame | None:
 
 # ── Funciones de procesamiento por tabla ──────────────────────────────────────
 
+def _filter_total_rows(df: pd.DataFrame, col: str, tabla: str) -> pd.DataFrame:
+    """Elimina filas de totales/subtotales en la columna indicada."""
+    n_pre = len(df)
+    df = df[~df[col].apply(is_total_row)]
+    n_dropped = n_pre - len(df)
+    if n_dropped:
+        log.info(f"  [{tabla}] {n_dropped} fila(s) de totales/encabezados descartadas")
+    return df
+
+
 def process_listas_espera(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
-    """Limpia y estandariza la hoja listas_espera_ss_trimestre."""
     df = normalize_columns(df, COL_MAP_LISTAS)
 
     for req in ("ss_id", "tipo_prestacion"):
@@ -349,13 +340,7 @@ def process_listas_espera(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
                 f"Columnas disponibles: {list(df.columns)}"
             )
 
-    # Filtrar filas de totales ANTES de normalize_ss_id.
-    # Sin este paso, filas como "Total Nacional" pasaban al DB con ss_id inválido.
-    n_pre_filter = len(df)
-    df = df[~df["ss_id"].apply(is_total_row)]
-    n_totales = n_pre_filter - len(df)
-    if n_totales:
-        log.info(f"  {n_totales} fila(s) de totales/encabezados descartadas")
+    df = _filter_total_rows(df, "ss_id", "listas_espera")
 
     df["ss_id"] = df["ss_id"].apply(normalize_ss_id)
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
@@ -388,7 +373,6 @@ def process_listas_espera(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
 
 
 def process_personas_nacional(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
-    """Limpia y estandariza la hoja personas_nacional_trimestre."""
     df = normalize_columns(df, COL_MAP_PERSONAS)
 
     if "tipo_prestacion" not in df.columns:
@@ -396,6 +380,10 @@ def process_personas_nacional(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
             f"Columna requerida 'tipo_prestacion' no encontrada. "
             f"Columnas disponibles: {list(df.columns)}"
         )
+
+    # Filtrar filas de totales si la hoja tiene columna identificable
+    if "personas_total" in df.columns:
+        df = _filter_total_rows(df, "tipo_prestacion", "personas_nacional")
 
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
     df = df.dropna(subset=["tipo_prestacion"])
@@ -410,7 +398,6 @@ def process_personas_nacional(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
 
 
 def process_nivel_atencion(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
-    """Limpia y estandariza la hoja nivel_atencion_trimestre."""
     df = normalize_columns(df, COL_MAP_NIVEL)
 
     for req in ("nivel_atencion", "tipo_prestacion"):
@@ -419,6 +406,8 @@ def process_nivel_atencion(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
                 f"Columna requerida '{req}' no encontrada. "
                 f"Columnas disponibles: {list(df.columns)}"
             )
+
+    df = _filter_total_rows(df, "nivel_atencion", "nivel_atencion")
 
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
     df["nivel_atencion"] = df["nivel_atencion"].str.strip().str.title()

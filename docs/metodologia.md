@@ -6,7 +6,7 @@ Este estudio corresponde a un **análisis observacional, longitudinal y ecológi
 
 La unidad de análisis es el **Servicio de Salud**, evaluado en forma trimestral, lo que permite analizar la evolución temporal de indicadores de listas de espera NO GES.
 
-El enfoque metodológico se centra en la **evaluación de la recuperación del sistema**, más que en una caracterización estática del nivel de espera.
+El enfoque metodológico se centra en la **evaluación de la recuperación del sistema** entre un período de referencia (2023_T3) y un período final (2025_T1), más que en una caracterización estática del nivel de espera.
 
 ---
 
@@ -33,6 +33,7 @@ Esto define una estructura de datos de tipo:
 - **Glosa 06 – Ley de Presupuestos (MINSAL)**
 
 Características:
+
 - Datos oficiales de carácter público
 - Periodicidad trimestral
 - Nivel de agregación:
@@ -41,6 +42,7 @@ Características:
   - Servicio de Salud
 
 Contiene información sobre:
+
 - Tiempos de espera (mediana, promedio)
 - Volumen de casos (personas y registros)
 - Distribución por nivel de atención
@@ -99,17 +101,21 @@ Se implementó un proceso de transformación en múltiples etapas:
 ### 5.1 Variables dependientes (outcomes)
 
 #### Mediana de días de espera (`mediana_dias`)
+
 - Indicador principal de tiempo de espera.
 - Robusto frente a distribuciones asimétricas.
 
-#### Velocidad de recuperación (variable derivada)
-- Definida como el cambio trimestral en la mediana:
+#### Evolución de la mediana (análisis comparativo)
 
-Δ mediana = mediana(t) – mediana(t-1)
+- Definida como la diferencia entre la mediana en el período final y el período de referencia:
 
-- Permite evaluar la dinámica de reducción de la lista.
+  Δ mediana = mediana(2025_T1) – mediana(2023_T3)
+
+- Permite evaluar la magnitud de la recuperación entre los dos períodos comparables.
+- Dado que la disponibilidad de medianas varía entre trimestres (ver `docs/limitaciones.md`), el análisis longitudinal se basa en los extremos del período con mayor cobertura de datos, no en una serie trimestral completa.
 
 #### Antigüedad extrema
+
 - `% >24 meses`
 - `% >36 meses`
 
@@ -120,19 +126,24 @@ Interpretadas como proxy de riesgo sanitario y presencia de cola larga.
 ### 5.2 Variables independientes
 
 #### Concentración en nivel terciario (`pct_nivel_terciario`)
+
 - Proporción de la demanda en establecimientos de alta complejidad.
+- Calculada sobre el total nacional de registros por período y tipo de prestación.
 - Utilizada como proxy de **fragmentación funcional de la red asistencial**.
+- Disponible en la vista `v_pct_nivel_terciario`.
 
 #### Volumen de demanda
+
 - `personas_espera`
 - `registros_espera`
 
 Utilizadas como variables de control.
 
 #### Asimetría (`asimetria`)
+
 - Definida como:
 
-promedio_dias – mediana_dias
+  asimetria = promedio_dias – mediana_dias
 
 - Proxy de dispersión y presencia de valores extremos.
 
@@ -145,14 +156,14 @@ El análisis se estructura en tres niveles:
 ### 6.1 Análisis descriptivo
 
 - Comparación de indicadores entre Servicios de Salud.
-- Evaluación de tendencias temporales.
+- Evaluación de tendencias entre el período de referencia y el período final.
 - Identificación de heterogeneidad en niveles de espera.
 
 ---
 
 ### 6.2 Análisis de recuperación
 
-- Evaluación de la **velocidad de reducción** de la mediana.
+- Evaluación del cambio en la mediana entre 2023_T3 y 2025_T1.
 - Comparación entre Servicios de Salud.
 - Identificación de patrones persistentes de rezago.
 
@@ -175,7 +186,7 @@ El análisis se estructura en tres niveles:
 
 Dada la variabilidad en la disponibilidad de información:
 
-- Los valores no disponibles se codifican como **NO DISPONIBLE**
+- Los valores no disponibles se codifican como **NA**
 - No se realizan imputaciones
 - El análisis se restringe a subconjuntos comparables cuando es necesario
 
@@ -205,6 +216,7 @@ Las limitaciones específicas por periodo se documentan en:
 
 - Variación entre años y tipos de prestación
 - Uso de proxies en ausencia de medición directa
+- La distribución por nivel hospitalario está disponible principalmente a nivel nacional
 
 ---
 
@@ -231,5 +243,3 @@ El proyecto busca maximizar reproducibilidad mediante:
 - Uso exclusivo de datos públicos agregados
 - No se utilizan datos personales ni identificables
 - Cumplimiento de principios de transparencia y uso responsable de información pública
-
----

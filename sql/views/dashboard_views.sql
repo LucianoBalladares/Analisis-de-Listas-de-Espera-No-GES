@@ -7,22 +7,15 @@
 -- Orden     : Ejecutar después del esquema completo (tablas + constraints)
 --
 -- Vistas incluidas:
---   v_dim_trimestre              → dimensión temporal para slicers
---   v_listas_espera_enriquecido  → tabla de hechos principal con métricas derivadas
---   v_nivel_atencion_distribucion→ % de demanda por nivel de atención
---   v_disponibilidad_indicadores → mapa de disponibilidad de datos por período
---
--- CORRECCIONES:
---   - v_dim_trimestre: usa UNION de las 3 tablas (antes solo listas_espera).
---     para identificar deltas calculados entre trimestres no consecutivos.
---   - v_listas_espera_enriquecido: pct_mayor_24m devuelve NULL cuando
---     ambos rangos son NULL, en lugar de sumar COALESCEs parciales.
+--   v_dim_trimestre                → dimensión temporal para slicers
+--   v_listas_espera_enriquecido    → tabla de hechos principal con métricas derivadas
+--   v_nivel_atencion_distribucion  → % de demanda por nivel de atención
+--   v_pct_nivel_terciario          → proporción de demanda en nivel terciario por período
+--   v_disponibilidad_indicadores   → mapa de disponibilidad de datos por período
 -- =================================================================
 -- -----------------------------------------------------------------
 -- 1. Dimensión temporal
 -- Cubre todos los trimestres presentes en cualquiera de las 3 tablas.
--- Antes solo incluía los de listas_espera_ss_trimestre, lo que podía
--- dejar fuera trimestres con datos solo en las otras tablas.
 -- -----------------------------------------------------------------
 CREATE OR REPLACE VIEW v_dim_trimestre AS WITH todos_trimestres AS (
         SELECT trimestre
@@ -39,7 +32,7 @@ SELECT DISTINCT trimestre,
     SUBSTRING(trimestre, 7, 1)::INT AS n_trimestre,
     'T' || SUBSTRING(trimestre, 7, 1) || ' ' || SUBSTRING(trimestre, 1, 4) AS etiqueta,
     -- Entero secuencial para ordenamiento correcto en Power BI
-    (SUBSTRING(trimestre, 1, 4)::INT - 2021) * 4 + SUBSTRING(trimestre, 7, 1)::INT AS periodo_orden,
+    SUBSTRING(trimestre, 1, 4)::INT * 4 + SUBSTRING(trimestre, 7, 1)::INT AS periodo_orden,
     -- Primer día del trimestre (útil para eje de fechas)
     MAKE_DATE(
         SUBSTRING(trimestre, 1, 4)::INT,
@@ -52,11 +45,11 @@ ORDER BY trimestre;
 -- 2. Tabla de hechos principal (enriquecida)
 -- Incluye todas las columnas originales más métricas derivadas.
 --
--- CORRECCIÓN pct_mayor_24m: devuelve NULL si ambos rangos son NULL.
--- Si solo uno tiene valor, COALESCE a 0 subestimaría silenciosamente.
--- pct_mayor_24m representa el % de registros con >24m de espera,
--- calculado como (reg_24a36m + reg_mayor_36m) / registros_espera,
--- dado que ambos son rangos disjuntos (24-36m y >36m respectivamente).
+-- pct_mayor_24m: devuelve NULL si cualquiera de los dos tramos es NULL.
+-- reg_24a36m y reg_mayor_36m son tramos mutuamente excluyentes:
+--   reg_24a36m  → registros con entre 24 y 36 meses de espera
+--   reg_mayor_36m → registros con más de 36 meses de espera
+--   Su suma representa el total de registros con más de 24 meses.
 -- -----------------------------------------------------------------
 CREATE OR REPLACE VIEW v_listas_espera_enriquecido AS
 SELECT l.id,
@@ -74,8 +67,6 @@ SELECT l.id,
     l.reg_24a36m,
     l.reg_mayor_36m,
     -- Antigüedad en porcentaje
-    -- pct_mayor_24m = % registros con >24m = (24-36m + >36m) / total
-    -- Solo se calcula si ambos rangos tienen dato; NULL si alguno falta.
     CASE
         WHEN l.registros_espera > 0
         AND l.reg_24a36m IS NOT NULL
@@ -84,7 +75,6 @@ SELECT l.id,
             1
         )
     END AS pct_mayor_24m,
-    -- pct_mayor_36m = % registros con >36m
     CASE
         WHEN l.registros_espera > 0
         AND l.reg_mayor_36m IS NOT NULL THEN ROUND(l.reg_mayor_36m / l.registros_espera * 100, 1)
@@ -92,7 +82,7 @@ SELECT l.id,
     -- Dimensiones temporales (facilitan fórmulas DAX y slicers)
     SUBSTRING(l.trimestre, 1, 4)::INT AS anio,
     SUBSTRING(l.trimestre, 7, 1)::INT AS n_trimestre,
-    (SUBSTRING(l.trimestre, 1, 4)::INT - 2021) * 4 + SUBSTRING(l.trimestre, 7, 1)::INT AS periodo_orden,
+    SUBSTRING(l.trimestre, 1, 4)::INT * 4 + SUBSTRING(l.trimestre, 7, 1)::INT AS periodo_orden,
     -- Trazabilidad
     l.fuente,
     l.observaciones,
@@ -100,7 +90,7 @@ SELECT l.id,
     l.updated_at
 FROM listas_espera_ss_trimestre l;
 -- -----------------------------------------------------------------
--- 4. Distribución por nivel de atención
+-- 3. Distribución por nivel de atención
 -- Calcula el porcentaje de registros por nivel dentro de cada
 -- trimestre y tipo de prestación.
 -- -----------------------------------------------------------------
@@ -123,8 +113,37 @@ SELECT n.nivel_atencion,
         ) * 100,
         1
     ) AS pct_nivel,
-    (SUBSTRING(n.trimestre, 1, 4)::INT - 2021) * 4 + SUBSTRING(n.trimestre, 7, 1)::INT AS periodo_orden
+    SUBSTRING(n.trimestre, 1, 4)::INT * 4 + SUBSTRING(n.trimestre, 7, 1)::INT AS periodo_orden
 FROM nivel_atencion_trimestre n;
+-- -----------------------------------------------------------------
+-- 4. Concentración en nivel terciario
+-- Proporción de registros en nivel terciario sobre el total nacional
+-- por trimestre y tipo de prestación. Usado como proxy de
+-- fragmentación funcional de la red asistencial.
+--
+-- NOTA: ajustar el valor de nivel_atencion_terciario según el string
+-- exacto que produce el OCR en nivel_atencion_trimestre.
+-- Valores comunes: 'Terciario', 'Alta Complejidad', 'Nivel Terciario'.
+-- -----------------------------------------------------------------
+CREATE OR REPLACE VIEW v_pct_nivel_terciario AS
+SELECT trimestre,
+    tipo_prestacion,
+    ROUND(
+        SUM(registros_total_nivel) FILTER (
+            WHERE nivel_atencion ILIKE '%terciario%'
+                OR nivel_atencion ILIKE '%alta complejidad%'
+        ) / NULLIF(SUM(registros_total_nivel), 0) * 100,
+        1
+    ) AS pct_nivel_terciario,
+    SUM(registros_total_nivel) FILTER (
+        WHERE nivel_atencion ILIKE '%terciario%'
+            OR nivel_atencion ILIKE '%alta complejidad%'
+    ) AS registros_terciario,
+    SUM(registros_total_nivel) AS registros_total,
+    SUBSTRING(trimestre, 1, 4)::INT * 4 + SUBSTRING(trimestre, 7, 1)::INT AS periodo_orden
+FROM nivel_atencion_trimestre
+GROUP BY trimestre,
+    tipo_prestacion;
 -- -----------------------------------------------------------------
 -- 5. Mapa de disponibilidad de indicadores
 -- Muestra qué indicadores tienen datos en cada período.
@@ -136,6 +155,8 @@ SELECT l.trimestre,
     COUNT(*) AS n_ss_cargados,
     -- Disponibilidad por indicador (TRUE = al menos 1 SS tiene el dato)
     BOOL_OR(l.mediana_dias IS NOT NULL) AS mediana_disponible,
+    BOOL_OR(l.promedio_dias IS NOT NULL) AS promedio_disponible,
+    BOOL_OR(l.asimetria IS NOT NULL) AS asimetria_disponible,
     BOOL_OR(l.personas_espera IS NOT NULL) AS personas_ss_disponible,
     BOOL_OR(l.reg_24a36m IS NOT NULL) AS tramo_24_36m_disponible,
     BOOL_OR(l.reg_mayor_36m IS NOT NULL) AS tramo_mayor_36m_disponible,
@@ -156,7 +177,7 @@ SELECT l.trimestre,
         WHERE na.trimestre = l.trimestre
             AND na.tipo_prestacion = l.tipo_prestacion
     ) AS nivel_atencion_disponible,
-    (SUBSTRING(l.trimestre, 1, 4)::INT - 2021) * 4 + SUBSTRING(l.trimestre, 7, 1)::INT AS periodo_orden
+    SUBSTRING(l.trimestre, 1, 4)::INT * 4 + SUBSTRING(l.trimestre, 7, 1)::INT AS periodo_orden
 FROM listas_espera_ss_trimestre l
 GROUP BY l.trimestre,
     l.tipo_prestacion

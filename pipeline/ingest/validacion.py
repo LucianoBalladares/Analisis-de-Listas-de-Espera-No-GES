@@ -48,37 +48,38 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD", ""),
 }
 
-
+# Catálogo vigente de Servicios de Salud según última Glosa 06.
+# 29 servicios — fuente de verdad para validación de cobertura.
 SS_ESPERADOS = {
-    "SS Arica y Parinacota", 
-    "SS Tarapacá", 
-    "SS Antofagasta", 
-    "SS Atacama", 
+    "SS Arica y Parinacota",
+    "SS Tarapacá",
+    "SS Antofagasta",
+    "SS Atacama",
     "SS Coquimbo",
-    "SS Valparaíso - San Antonio", 
-    "SS Viña del Mar - Quillota", 
+    "SS Valparaíso - San Antonio",
+    "SS Viña del Mar - Quillota",
     "SS Aconcagua",
-    "SS Metropolitano Norte", 
-    "SS Metropolitano Occidente", 
+    "SS Metropolitano Norte",
+    "SS Metropolitano Occidente",
     "SS Metropolitano Central",
-    "SS Metropolitano Oriente", 
-    "SS Metropolitano Sur", 
+    "SS Metropolitano Oriente",
+    "SS Metropolitano Sur",
     "SS Metropolitano Sur Oriente",
-    "SS O'Higgins", 
-    "SS Maule", 
-    "SS Ñuble", 
+    "SS O'Higgins",
+    "SS Maule",
+    "SS Ñuble",
     "SS Concepción",
-    "SS Arauco",     
+    "SS Arauco",
     "SS Talcahuano",
-    "SS Biobío", 
-    "SS Araucanía Norte", 
-    "SS Araucanía Sur", 
-    "SS Los Ríos",   
+    "SS Biobío",
+    "SS Araucanía Norte",
+    "SS Araucanía Sur",
+    "SS Los Ríos",
     "SS Osorno",
-    "SS Del Reloncaví", 
-    "SS Chiloé", 
-    "SS Aysén", 
-    "SS Magallanes"
+    "SS Del Reloncaví",
+    "SS Chiloé",
+    "SS Aysén",
+    "SS Magallanes",
 }
 
 SS_ESPECIALES = {"No definido", "NO DEFINIDO", "Sin asignar"}
@@ -89,7 +90,7 @@ def get_conn():
     return psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
-def query(conn, sql: str, params=None) -> list[dict]:
+def query(conn, sql: str, params=None) -> list:
     with conn.cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
@@ -106,7 +107,7 @@ def warn(msg):  log.warning(f"  ⚠  {msg}")
 def error(msg): log.error(f"  ✗ {msg}")
 
 
-def fmt_table(rows: list[dict], floatfmt=".1f") -> str:
+def fmt_table(rows: list, floatfmt=".1f") -> str:
     if not rows:
         return "  (sin resultados)"
     headers = list(rows[0].keys())
@@ -114,7 +115,7 @@ def fmt_table(rows: list[dict], floatfmt=".1f") -> str:
     return tabulate(data, headers=headers, tablefmt="simple", floatfmt=floatfmt)
 
 
-def trimestre_filter(trimestre: str | None) -> tuple[str, list]:
+def trimestre_filter(trimestre):
     """Retorna cláusula WHERE y parámetros según si hay filtro de trimestre."""
     if trimestre:
         return "WHERE trimestre = %s", [trimestre]
@@ -179,7 +180,7 @@ def check_ss_no_estandarizados(conn, trimestre) -> int:
     """, params)
 
     ss_encontrados = {r["ss_id"] for r in rows}
-    fuera_catalogo = ss_encontrados - SS_ESPERADOS - SS_ESPECIALES  # excluir especiales
+    fuera_catalogo = ss_encontrados - SS_ESPERADOS - SS_ESPECIALES
 
     if not fuera_catalogo:
         ok(f"Todos los ss_id están en el catálogo ({len(ss_encontrados - SS_ESPECIALES)} estándar)")
@@ -191,32 +192,46 @@ def check_ss_no_estandarizados(conn, trimestre) -> int:
 
 
 def check_coherencia_antiguedad(conn, trimestre) -> int:
-    """reg_mayor_36m no puede superar reg_24a36m (los >36m son subconjunto de >24m)."""
-    wh, params = trimestre_filter(trimestre)
+    """
+    Valida que la suma de los tramos de antigüedad no supere los registros totales.
+
+    reg_24a36m y reg_mayor_36m son tramos MUTUAMENTE EXCLUYENTES:
+      - reg_24a36m  → registros con entre 24 y 36 meses de espera
+      - reg_mayor_36m → registros con más de 36 meses de espera
+    No existe relación de orden entre ellos. La única restricción válida
+    es que su suma no puede superar registros_espera (el total).
+    """
+    wh_and = "AND trimestre = %s" if trimestre else ""
+    params = [trimestre] if trimestre else []
 
     rows = query(conn, f"""
         SELECT ss_id, trimestre, tipo_prestacion,
-               reg_24a36m, reg_mayor_36m
+               registros_espera,
+               reg_24a36m,
+               reg_mayor_36m,
+               (reg_24a36m + reg_mayor_36m) AS suma_tramos
         FROM listas_espera_ss_trimestre
-        WHERE reg_mayor_36m IS NOT NULL
-          AND reg_24a36m IS NOT NULL
-          AND reg_mayor_36m > reg_24a36m
-          {('AND trimestre = %s' if trimestre else '')}
+        WHERE reg_24a36m      IS NOT NULL
+          AND reg_mayor_36m   IS NOT NULL
+          AND registros_espera IS NOT NULL
+          AND (reg_24a36m + reg_mayor_36m) > registros_espera
+          {wh_and}
         ORDER BY trimestre, ss_id
     """, params)
 
     if not rows:
-        ok("Sin inconsistencias en tramos de antigüedad")
+        ok("Suma de tramos de antigüedad no supera registros_espera en ningún registro")
         return 0
 
-    error(f"{len(rows)} fila(s) con reg_mayor_36m > reg_24a36m:")
+    error(f"{len(rows)} fila(s) donde reg_24a36m + reg_mayor_36m > registros_espera:")
     log.error(fmt_table(rows))
     return len(rows)
 
 
 def check_asimetria(conn, trimestre) -> int:
     """La columna asimetria debe coincidir con promedio_dias - mediana_dias."""
-    wh, params = trimestre_filter(trimestre)
+    wh_and = "AND trimestre = %s" if trimestre else ""
+    params = [trimestre] if trimestre else []
 
     rows = query(conn, f"""
         SELECT ss_id, trimestre, tipo_prestacion,
@@ -228,7 +243,7 @@ def check_asimetria(conn, trimestre) -> int:
           AND mediana_dias IS NOT NULL
           AND asimetria IS NOT NULL
           AND ABS(asimetria - ROUND(promedio_dias - mediana_dias, 1)) > 0.5
-          {('AND trimestre = %s' if trimestre else '')}
+          {wh_and}
         ORDER BY trimestre, ss_id
     """, params)
 
@@ -243,24 +258,23 @@ def check_asimetria(conn, trimestre) -> int:
 
 def check_outliers(conn, trimestre) -> int:
     """Detecta valores extremos que pueden indicar errores de OCR."""
-    wh, params = trimestre_filter(trimestre)
+    wh_and = "AND trimestre = %s" if trimestre else ""
+    params = [trimestre] if trimestre else []
 
-    # Medianas fuera de rango razonable
     rows_mediana = query(conn, f"""
         SELECT ss_id, trimestre, tipo_prestacion, mediana_dias
         FROM listas_espera_ss_trimestre
         WHERE (mediana_dias < 0 OR mediana_dias > 3650)
-          {('AND trimestre = %s' if trimestre else '')}
+          {wh_and}
         ORDER BY mediana_dias DESC
     """, params)
 
-    # Conteos negativos
     rows_neg = query(conn, f"""
         SELECT ss_id, trimestre, tipo_prestacion,
                personas_espera, registros_espera
         FROM listas_espera_ss_trimestre
         WHERE (personas_espera < 0 OR registros_espera < 0)
-          {('AND trimestre = %s' if trimestre else '')}
+          {wh_and}
     """, params)
 
     errors = 0
@@ -282,7 +296,7 @@ def check_outliers(conn, trimestre) -> int:
 
 
 def check_nulos_criticos(conn, trimestre) -> int:
-    """Detecta nulos en columnas que deberían tener valor según el período."""
+    """Reporta nulos por trimestre. Los nulos son esperados según limitaciones.md."""
     wh, params = trimestre_filter(trimestre)
 
     rows = query(conn, f"""
@@ -344,7 +358,7 @@ CHECKS = [
 ]
 
 
-def main(trimestre: str | None = None):
+def main(trimestre=None):
     if trimestre and not re.match(r'^\d{4}_T[1-4]$', trimestre):
         log.error(f"Formato de trimestre inválido: '{trimestre}'. Ejemplo válido: 2024_T3")
         sys.exit(1)

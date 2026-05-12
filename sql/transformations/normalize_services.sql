@@ -3,30 +3,65 @@
 -- Archivo  : sql/transformations/normalize_services.sql
 -- Descripción: Estandarización de nombres de Servicios de Salud
 --
--- Contexto: el ingester normaliza ss_id durante la carga, pero
--- variantes de OCR no previstas pueden pasar sin ser reconocidas
--- (el ingester las guarda con el valor original como fallback).
--- Este script aplica una segunda capa de normalización.
+-- Catálogo vigente: 29 Servicios de Salud según última Glosa 06.
+-- Nombres históricos cubiertos (datos desde 2021):
+--   SS Arica / Arica            → SS Arica y Parinacota
+--   SS Iquique / Iquique        → SS Tarapacá
+--   SS Valdivia / Valdivia      → SS Los Ríos
 --
 -- Idempotente: después de la primera ejecución exitosa no hay
 -- filas que cumplan las condiciones WHERE, por lo que no hay efecto.
---
--- CORRECCIONES:
---   - Eliminadas entradas no-op de la tabla de correcciones (raw = estándar).
---   - Eliminado SELECT de diagnóstico final: run_transformations.py
---     lo ejecuta por separado y lo registra en el log (ver DIAGNOSTIC_QUERY).
 -- =================================================================
 -- -----------------------------------------------------------------
--- 1. Tabla temporal de correcciones exactas conocidas
---    Extender cuando aparezcan nuevas variantes de OCR.
---    Formato: (valor_en_db, valor_estandar)
---    NOTA: no incluir filas donde raw = estandar (no-ops).
+-- Lista canónica de los 29 SS vigentes.
+-- Usada como referencia en los WHERE de exclusión.
+-- -----------------------------------------------------------------
+-- 'SS Arica y Parinacota', 'SS Tarapacá', 'SS Antofagasta',
+-- 'SS Atacama', 'SS Coquimbo',
+-- 'SS Viña del Mar - Quillota', 'SS Valparaíso - San Antonio', 'SS Aconcagua',
+-- 'SS Metropolitano Norte', 'SS Metropolitano Occidente',
+-- 'SS Metropolitano Central', 'SS Metropolitano Oriente',
+-- 'SS Metropolitano Sur', 'SS Metropolitano Sur Oriente',
+-- 'SS O''Higgins', 'SS Maule', 'SS Ñuble',
+-- 'SS Concepción', 'SS Arauco', 'SS Talcahuano', 'SS Biobío',
+-- 'SS Araucanía Norte', 'SS Araucanía Sur',
+-- 'SS Los Ríos', 'SS Osorno', 'SS Del Reloncaví', 'SS Chiloé',
+-- 'SS Aysén', 'SS Magallanes'
+-- -----------------------------------------------------------------
+-- 1. Correcciones exactas conocidas
+--    Cubre prefijos largos de OCR, nombres históricos y variantes
+--    de ortografía/abreviatura frecuentes.
 -- -----------------------------------------------------------------
 WITH correcciones (raw, estandar) AS (
-    VALUES -- Prefijo largo
+    VALUES -- ── Nombres históricos (renombres desde 2021) ─────────────
         (
-            'Servicio de Salud Arica',
-            'SS Arica'
+            'SS Arica',
+            'SS Arica y Parinacota'
+        ),
+        (
+            'Arica',
+            'SS Arica y Parinacota'
+        ),
+        (
+            'SS Iquique',
+            'SS Tarapacá'
+        ),
+        (
+            'Iquique',
+            'SS Tarapacá'
+        ),
+        (
+            'SS Valdivia',
+            'SS Los Ríos'
+        ),
+        (
+            'Valdivia',
+            'SS Los Ríos'
+        ),
+        -- ── Prefijo largo por OCR ─────────────────────────────────
+        (
+            'Servicio de Salud Arica y Parinacota',
+            'SS Arica y Parinacota'
         ),
         (
             'Servicio de Salud Tarapacá',
@@ -57,12 +92,24 @@ WITH correcciones (raw, estandar) AS (
             'SS Ñuble'
         ),
         (
+            'Servicio de Salud Concepción',
+            'SS Concepción'
+        ),
+        (
+            'Servicio de Salud Arauco',
+            'SS Arauco'
+        ),
+        (
             'Servicio de Salud Talcahuano',
             'SS Talcahuano'
         ),
         (
-            'Servicio de Salud Valdivia',
-            'SS Valdivia'
+            'Servicio de Salud Biobío',
+            'SS Biobío'
+        ),
+        (
+            'Servicio de Salud Los Ríos',
+            'SS Los Ríos'
         ),
         (
             'Servicio de Salud Osorno',
@@ -80,7 +127,7 @@ WITH correcciones (raw, estandar) AS (
             'Servicio de Salud Magallanes',
             'SS Magallanes'
         ),
-        -- Compuestos con guión omitido por OCR
+        -- ── Compuestos con guión omitido por OCR ─────────────────
         (
             'SS Viña del Mar Quillota',
             'SS Viña del Mar - Quillota'
@@ -109,7 +156,7 @@ WITH correcciones (raw, estandar) AS (
             'Servicio de Salud Valparaíso - San Antonio',
             'SS Valparaíso - San Antonio'
         ),
-        -- Metropolitano (abreviaturas OCR)
+        -- ── Metropolitano (abreviaturas de OCR) ───────────────────
         (
             'SSMO Norte',
             'SS Metropolitano Norte'
@@ -162,7 +209,7 @@ WITH correcciones (raw, estandar) AS (
             'Servicio de Salud Metropolitano Sur Oriente',
             'SS Metropolitano Sur Oriente'
         ),
-        -- Araucanía
+        -- ── Araucanía ─────────────────────────────────────────────
         (
             'SS Araucania Norte',
             'SS Araucanía Norte'
@@ -179,7 +226,7 @@ WITH correcciones (raw, estandar) AS (
             'Servicio de Salud Araucanía Sur',
             'SS Araucanía Sur'
         ),
-        -- Biobío / Ñuble / O''Higgins
+        -- ── Biobío y variantes de ortografía ──────────────────────
         (
             'SS Biobio',
             'SS Biobío'
@@ -189,8 +236,8 @@ WITH correcciones (raw, estandar) AS (
             'SS Biobío'
         ),
         (
-            'SS Nuble',
-            'SS Ñuble'
+            'Servicio de Salud O''Higgins',
+            'SS O''Higgins'
         ),
         (
             'SS O Higgins',
@@ -201,18 +248,10 @@ WITH correcciones (raw, estandar) AS (
             'SS O''Higgins'
         ),
         (
-            'Servicio de Salud O''Higgins',
-            'SS O''Higgins'
-        ),
-        (
-            'Servicio de Salud Biobío',
-            'SS Biobío'
-        ),
-        (
-            'Servicio de Salud Ñuble',
+            'SS Nuble',
             'SS Ñuble'
         ),
-        -- Reloncaví
+        -- ── Reloncaví ─────────────────────────────────────────────
         (
             'SS Reloncaví',
             'SS Del Reloncaví'
@@ -233,7 +272,6 @@ SET ss_id = c.estandar,
 FROM correcciones c
 WHERE l.ss_id = c.raw
     AND l.ss_id <> c.estandar;
--- evitar re-procesar los ya correctos
 -- -----------------------------------------------------------------
 -- 2. Normalización por coincidencia parcial (segunda pasada)
 --    Para variantes no cubiertas por la tabla exacta.
@@ -254,12 +292,18 @@ SET ss_id = CASE
         WHEN ss_id ILIKE '%araucan%sur%' THEN 'SS Araucanía Sur'
         WHEN ss_id ILIKE '%biob%' THEN 'SS Biobío'
         WHEN ss_id ILIKE '%higgins%' THEN 'SS O''Higgins'
+        WHEN ss_id ILIKE '%parinacota%'
+        OR ss_id ILIKE '%arica%' THEN 'SS Arica y Parinacota'
+        WHEN ss_id ILIKE '%iquique%' THEN 'SS Tarapacá'
+        WHEN ss_id ILIKE '%valdivia%'
+        OR ss_id ILIKE '%los r%os%' THEN 'SS Los Ríos'
+        WHEN ss_id ILIKE '%concepci%' THEN 'SS Concepción'
         ELSE ss_id
     END,
     observaciones = COALESCE(observaciones || ' | ', '') || 'ss_id normalizado por coincidencia parcial',
     updated_at = NOW()
 WHERE ss_id NOT IN (
-        'SS Arica',
+        'SS Arica y Parinacota',
         'SS Tarapacá',
         'SS Antofagasta',
         'SS Atacama',
@@ -276,11 +320,13 @@ WHERE ss_id NOT IN (
         'SS O''Higgins',
         'SS Maule',
         'SS Ñuble',
-        'SS Biobío',
+        'SS Concepción',
+        'SS Arauco',
         'SS Talcahuano',
+        'SS Biobío',
         'SS Araucanía Norte',
         'SS Araucanía Sur',
-        'SS Valdivia',
+        'SS Los Ríos',
         'SS Osorno',
         'SS Del Reloncaví',
         'SS Chiloé',
@@ -290,13 +336,24 @@ WHERE ss_id NOT IN (
 -- -----------------------------------------------------------------
 -- DIAGNOSTIC_QUERY — ejecutada por run_transformations.py
 -- después de este script para registrar ss_id no reconocidos.
--- NO incluir aquí: el resultado se descartaría silenciosamente.
 --
 -- SELECT ss_id AS ss_id_no_reconocido,
 --        COUNT(*) AS n_registros,
 --        STRING_AGG(DISTINCT trimestre, ', ' ORDER BY trimestre) AS trimestres
 -- FROM listas_espera_ss_trimestre
--- WHERE ss_id NOT IN ( ... lista canónica ... )
+-- WHERE ss_id NOT IN (
+--     'SS Arica y Parinacota', 'SS Tarapacá', 'SS Antofagasta',
+--     'SS Atacama', 'SS Coquimbo',
+--     'SS Viña del Mar - Quillota', 'SS Valparaíso - San Antonio', 'SS Aconcagua',
+--     'SS Metropolitano Norte', 'SS Metropolitano Occidente',
+--     'SS Metropolitano Central', 'SS Metropolitano Oriente',
+--     'SS Metropolitano Sur', 'SS Metropolitano Sur Oriente',
+--     'SS O''Higgins', 'SS Maule', 'SS Ñuble',
+--     'SS Concepción', 'SS Arauco', 'SS Talcahuano', 'SS Biobío',
+--     'SS Araucanía Norte', 'SS Araucanía Sur',
+--     'SS Los Ríos', 'SS Osorno', 'SS Del Reloncaví', 'SS Chiloé',
+--     'SS Aysén', 'SS Magallanes'
+-- )
 -- GROUP BY ss_id
 -- ORDER BY n_registros DESC;
 -- -----------------------------------------------------------------

@@ -59,6 +59,22 @@ TRANSFORMATIONS = [
     SQL_DIR / "clean_waitlists.sql",
 ]
 
+# Catálogo vigente de 29 SS — debe mantenerse sincronizado con
+# normalize_services.sql, excel_a_sql.py y validacion.py.
+SS_CANONICOS = {
+    'SS Arica y Parinacota', 'SS Tarapacá', 'SS Antofagasta',
+    'SS Atacama', 'SS Coquimbo',
+    'SS Viña del Mar - Quillota', 'SS Valparaíso - San Antonio', 'SS Aconcagua',
+    'SS Metropolitano Norte', 'SS Metropolitano Occidente',
+    'SS Metropolitano Central', 'SS Metropolitano Oriente',
+    'SS Metropolitano Sur', 'SS Metropolitano Sur Oriente',
+    "SS O'Higgins", 'SS Maule', 'SS Ñuble',
+    'SS Concepción', 'SS Arauco', 'SS Talcahuano', 'SS Biobío',
+    'SS Araucanía Norte', 'SS Araucanía Sur',
+    'SS Los Ríos', 'SS Osorno', 'SS Del Reloncaví', 'SS Chiloé',
+    'SS Aysén', 'SS Magallanes',
+}
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def parse_args():
@@ -72,19 +88,15 @@ def parse_args():
     return parser.parse_args()
 
 
-def split_statements(sql: str) -> list[str]:
+def split_statements(sql: str) -> list:
     """
     Divide el contenido de un archivo SQL en sentencias individuales.
     Ignora líneas de solo comentarios y sentencias vacías.
-    El bloque WITH...UPDATE se trata como una sola sentencia.
     """
-    # Eliminar comentarios de línea completa para el split,
-    # pero preservar el SQL original por fidelidad al ejecutar.
     raw_statements = sql.split(";")
     statements = []
     for stmt in raw_statements:
         clean = stmt.strip()
-        # Ignorar bloques vacíos o que solo contienen comentarios
         non_comment = "\n".join(
             line for line in clean.splitlines()
             if line.strip() and not line.strip().startswith("--")
@@ -96,8 +108,10 @@ def split_statements(sql: str) -> list[str]:
 
 def execute_sql_file(conn, filepath: Path) -> dict:
     """
-    Ejecuta todas las sentencias de un archivo SQL dentro de una
+    Ejecuta todas las sentencias DML de un archivo SQL dentro de una
     transacción. Retorna estadísticas de ejecución.
+    Los SELECT de diagnóstico (sin rowcount > 0) se ejecutan pero
+    sus resultados se descartan — están pensados como referencia, no como log.
     """
     if not filepath.exists():
         raise FileNotFoundError(f"Archivo SQL no encontrado: {filepath}")
@@ -113,7 +127,6 @@ def execute_sql_file(conn, filepath: Path) -> dict:
         for stmt in statements:
             try:
                 cur.execute(stmt)
-                # rowcount > 0 solo en DML (UPDATE, INSERT, DELETE)
                 if cur.rowcount and cur.rowcount > 0:
                     total_affected += cur.rowcount
                 executed += 1
@@ -125,15 +138,14 @@ def execute_sql_file(conn, filepath: Path) -> dict:
                 ) from e
 
     return {
-        "archivo":        filepath.name,
-        "sentencias":     executed,
+        "archivo":         filepath.name,
+        "sentencias":      executed,
         "filas_afectadas": total_affected,
     }
 
 
 def log_pipeline_run(conn, archivo: str, trimestre: str, estado: str,
                      filas: int = 0, detalle: str = None):
-    """Registra la ejecución en pipeline_runs."""
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO pipeline_runs
@@ -151,33 +163,29 @@ def log_pipeline_run(conn, archivo: str, trimestre: str, estado: str,
         ))
 
 
-def print_post_transform_report(conn, trimestre: str | None):
+def print_post_transform_report(conn, trimestre):
     """
     Muestra un resumen del estado de los datos tras las transformaciones.
     """
     log.info("")
     log.info("── Resumen post-transformación")
 
-    wh = "WHERE trimestre = %s" if trimestre else ""
-    params = [trimestre] if trimestre else []
+    wh      = "WHERE trimestre = %s" if trimestre else ""
+    wh_and  = "AND trimestre = %s"   if trimestre else ""
+    params  = [trimestre] if trimestre else []
+
+    # Construir cláusula IN con el catálogo canónico
+    placeholders = ", ".join(["%s"] * len(SS_CANONICOS))
+    ss_list = list(SS_CANONICOS)
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         # ss_id sin reconocer
         cur.execute(f"""
             SELECT COUNT(DISTINCT ss_id) AS ss_no_reconocidos
             FROM listas_espera_ss_trimestre
-            WHERE ss_id NOT IN (
-                'SS Arica','SS Tarapacá','SS Antofagasta','SS Atacama','SS Coquimbo',
-                'SS Viña del Mar - Quillota','SS Valparaíso - San Antonio','SS Aconcagua',
-                'SS Metropolitano Norte','SS Metropolitano Occidente',
-                'SS Metropolitano Central','SS Metropolitano Oriente',
-                'SS Metropolitano Sur','SS Metropolitano Sur Oriente',
-                'SS O''Higgins','SS Maule','SS Ñuble','SS Biobío','SS Talcahuano',
-                'SS Araucanía Norte','SS Araucanía Sur','SS Valdivia','SS Osorno',
-                'SS Del Reloncaví','SS Chiloé','SS Aysén','SS Magallanes'
-            )
-            {('AND trimestre = %s' if trimestre else '')}
-        """, params)
+            WHERE ss_id NOT IN ({placeholders})
+            {wh_and}
+        """, ss_list + params)
         ss_issues = cur.fetchone()["ss_no_reconocidos"]
 
         # Alertas activas
@@ -185,7 +193,7 @@ def print_post_transform_report(conn, trimestre: str | None):
             SELECT COUNT(*) AS alertas
             FROM listas_espera_ss_trimestre
             WHERE observaciones LIKE '%ALERTA%'
-            {('AND trimestre = %s' if trimestre else '')}
+            {wh_and}
         """, params)
         alertas = cur.fetchone()["alertas"]
 
@@ -201,11 +209,12 @@ def print_post_transform_report(conn, trimestre: str | None):
         """, params)
         row = cur.fetchone()
 
-    # Resultados
     scope = f"trimestre {trimestre}" if trimestre else "toda la base"
-    log.info(f"  Alcance         : {scope}")
-    log.info(f"  ss_id sin normalizar : {ss_issues}  {'✓' if ss_issues == 0 else '⚠  (ver normalize_services.sql)'}")
-    log.info(f"  Alertas activas      : {alertas}  {'✓' if alertas == 0 else '⚠  (revisar columna observaciones)'}")
+    log.info(f"  Alcance              : {scope}")
+    log.info(f"  ss_id sin normalizar : {ss_issues}  "
+             f"{'✓' if ss_issues == 0 else '⚠  (ver normalize_services.sql)'}")
+    log.info(f"  Alertas activas      : {alertas}  "
+             f"{'✓' if alertas == 0 else '⚠  (revisar columna observaciones)'}")
     log.info(f"  Asimetría faltante   : {row['asimetria_faltante']} de {row['total']} filas  "
              f"{'✓' if row['asimetria_faltante'] == 0 else '(mediana o promedio sin dato en esos registros)'}")
 
@@ -233,7 +242,6 @@ def main():
         for sql_file in TRANSFORMATIONS:
             log.info(f"\n── {sql_file.name}")
 
-            # Cada archivo corre en su propia transacción
             try:
                 result = execute_sql_file(conn, sql_file)
                 conn.commit()
@@ -252,7 +260,6 @@ def main():
                                  "error", detalle=str(e))
                 conn.commit()
                 has_errors = True
-                # Detener si falla normalize_services (clean_waitlists depende de ss_id correctos)
                 if "normalize_services" in sql_file.name:
                     log.error("  Deteniendo pipeline: normalize_services es prerequisito.")
                     break
