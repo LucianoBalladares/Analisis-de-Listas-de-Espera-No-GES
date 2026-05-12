@@ -121,23 +121,25 @@ FROM nivel_atencion_trimestre n;
 -- por trimestre y tipo de prestación. Usado como proxy de
 -- fragmentación funcional de la red asistencial.
 --
--- NOTA: ajustar el valor de nivel_atencion_terciario según el string
--- exacto que produce el OCR en nivel_atencion_trimestre.
--- Valores comunes: 'Terciario', 'Alta Complejidad', 'Nivel Terciario'.
+-- Valores posibles de nivel_atencion: 'Primario', 'Secundario', 'Terciario'.
 -- -----------------------------------------------------------------
 CREATE OR REPLACE VIEW v_pct_nivel_terciario AS
 SELECT trimestre,
     tipo_prestacion,
     ROUND(
         SUM(registros_total_nivel) FILTER (
-            WHERE nivel_atencion ILIKE '%terciario%'
-                OR nivel_atencion ILIKE '%alta complejidad%'
+            WHERE nivel_atencion = 'Terciario'
         ) / NULLIF(SUM(registros_total_nivel), 0) * 100,
         1
     ) AS pct_nivel_terciario,
     SUM(registros_total_nivel) FILTER (
-        WHERE nivel_atencion ILIKE '%terciario%'
-            OR nivel_atencion ILIKE '%alta complejidad%'
+        WHERE nivel_atencion = 'Primario'
+    ) AS registros_primario,
+    SUM(registros_total_nivel) FILTER (
+        WHERE nivel_atencion = 'Secundario'
+    ) AS registros_secundario,
+    SUM(registros_total_nivel) FILTER (
+        WHERE nivel_atencion = 'Terciario'
     ) AS registros_terciario,
     SUM(registros_total_nivel) AS registros_total,
     SUBSTRING(trimestre, 1, 4)::INT * 4 + SUBSTRING(trimestre, 7, 1)::INT AS periodo_orden
