@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
 """
-validacion.py
-=============
 Validación de integridad y calidad de datos post-carga.
 
 Genera un reporte con conteos, alertas y problemas detectados.
@@ -55,7 +52,7 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD", ""),
 }
 
-# M1: catálogo importado desde pipeline.config.catalogos
+# Catálogo importado desde pipeline.config.catalogos
 # SS_CANONICOS  → 29 servicios estándar vigentes
 # SS_ESPECIALES → valores admitidos pero no estándar ('No definido', etc.)
 # NIVELES_ATENCION → {'Primario', 'Secundario', 'Terciario'}

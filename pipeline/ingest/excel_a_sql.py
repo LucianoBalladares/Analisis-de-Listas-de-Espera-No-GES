@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
 """
-excel_a_sql.py
-==============
 Ingesta de datos desde Excel trimestral a PostgreSQL.
 
 Uso:
@@ -170,9 +167,6 @@ def clean_numeric(val) -> float | None:
         "N/D", "-"  → None
         Negativos   → None (aberrantes en este dominio; se loguean)  [C2]
 
-    Nota M2: el OCR está configurado explícitamente para NO usar coma ni punto
-    como separador de miles. Por eso, cuando hay una sola coma, se trata siempre
-    como separador decimal independientemente de cuántos dígitos haya tras ella.
     """
     if pd.isna(val):
         return None
@@ -189,9 +183,7 @@ def clean_numeric(val) -> float | None:
     elif ',' in s:
         parts = s.split(',')
         if len(parts) == 2:
-            # M2: OCR garantiza que la coma es separador decimal (nunca de miles).
-            # Se elimina la restricción anterior de <= 2 dígitos para evitar
-            # que "0,365" → 365 en lugar de 0.365.
+            # OCR garantiza que la coma es separador decimal (nunca de miles).
             s = s.replace(',', '.')
         else:
             # Múltiples comas: dato corrupto, descartar
@@ -206,7 +198,7 @@ def clean_numeric(val) -> float | None:
     except ValueError:
         return None
 
-    # C2: valores negativos son aberrantes en este dominio (días de espera,
+    # valores negativos son aberrantes en este dominio (días de espera,
     # conteos de personas). Se descartan como NULL con advertencia en el log,
     # evitando que un valor OCR erróneo viole el CHECK CONSTRAINT de PostgreSQL
     # y provoque un rollback del archivo completo.
@@ -342,9 +334,6 @@ def process_personas_nacional(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
             f"Columnas disponibles: {list(df.columns)}"
         )
 
-    # M3: el filtro actúa sobre tipo_prestacion, no sobre personas_total.
-    # La condición correcta es verificar que tipo_prestacion exista (garantizado
-    # por el check anterior), haciendo el filtro siempre aplicable.
     df = _filter_total_rows(df, "tipo_prestacion", "personas_nacional")
 
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)

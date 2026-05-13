@@ -157,10 +157,6 @@ GROUP BY trimestre,
 -- 5. Mapa de disponibilidad de indicadores
 -- Muestra qué indicadores tienen datos en cada período.
 -- Útil para marcar visualmente datos faltantes en Power BI.
---
--- M5: se agrega registros_espera_disponible. Esta columna es el
--- denominador de todos los cálculos de porcentaje de antigüedad;
--- si es NULL, pct_mayor_24m y pct_mayor_36m también serán NULL.
 -- -----------------------------------------------------------------
 CREATE OR REPLACE VIEW v_disponibilidad_indicadores AS
 SELECT l.trimestre,
@@ -172,7 +168,6 @@ SELECT l.trimestre,
     BOOL_OR(l.asimetria IS NOT NULL) AS asimetria_disponible,
     BOOL_OR(l.personas_espera IS NOT NULL) AS personas_ss_disponible,
     BOOL_OR(l.registros_espera IS NOT NULL) AS registros_espera_disponible,
-    -- M5
     BOOL_OR(l.reg_24a36m IS NOT NULL) AS tramo_24_36m_disponible,
     BOOL_OR(l.reg_mayor_36m IS NOT NULL) AS tramo_mayor_36m_disponible,
     BOOL_OR(

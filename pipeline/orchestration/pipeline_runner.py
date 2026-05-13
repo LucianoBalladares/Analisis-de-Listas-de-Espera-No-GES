@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
 """
-pipeline_runner.py
-==================
 Orquestador del pipeline completo para un archivo Excel trimestral.
 
 Encadena los tres pasos en el orden correcto y detiene la ejecución

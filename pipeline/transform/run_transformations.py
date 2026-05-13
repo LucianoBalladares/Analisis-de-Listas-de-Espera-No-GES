@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
 """
-run_transformations.py
-======================
 Ejecuta las transformaciones SQL sobre la base de datos en el orden correcto.
 
 Uso:
@@ -65,7 +62,7 @@ TRANSFORMATIONS = [
     SQL_DIR / "clean_waitlists.sql",
 ]
 
-# M1: SS_CANONICOS importado desde pipeline.config.catalogos
+# SS_CANONICOS importado desde pipeline.config.catalogos
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -81,20 +78,6 @@ def parse_args():
 
 
 def split_statements(sql: str) -> list[str]:
-    """
-    M4: Divide SQL en sentencias individuales respetando literales de texto.
-
-    La versión anterior usaba sql.split(';') a ciegas, lo que rompería
-    ante cualquier literal de string que contuviera un punto y coma
-    (ej: mensajes de error, URLs, etc.).
-
-    Esta implementación recorre el SQL caracter a caracter y respeta:
-      - Literales de comilla simple ('...')  con escape por duplicación ('')
-      - Literales de comilla doble ("...")  con escape por duplicación ("")
-      - Comentarios de línea (--)
-
-    No soporta dollar-quoting ($$ ... $$) ya que no se usa en este proyecto.
-    """
     statements: list[str] = []
     buf: list[str] = []
     i = 0

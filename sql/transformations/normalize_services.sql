@@ -334,26 +334,3 @@ WHERE ss_id NOT IN (
         'SS Magallanes'
     );
 -- -----------------------------------------------------------------
--- DIAGNOSTIC_QUERY — ejecutada por run_transformations.py
--- después de este script para registrar ss_id no reconocidos.
---
--- SELECT ss_id AS ss_id_no_reconocido,
---        COUNT(*) AS n_registros,
---        STRING_AGG(DISTINCT trimestre, ', ' ORDER BY trimestre) AS trimestres
--- FROM listas_espera_ss_trimestre
--- WHERE ss_id NOT IN (
---     'SS Arica y Parinacota', 'SS Tarapacá', 'SS Antofagasta',
---     'SS Atacama', 'SS Coquimbo',
---     'SS Viña del Mar - Quillota', 'SS Valparaíso - San Antonio', 'SS Aconcagua',
---     'SS Metropolitano Norte', 'SS Metropolitano Occidente',
---     'SS Metropolitano Central', 'SS Metropolitano Oriente',
---     'SS Metropolitano Sur', 'SS Metropolitano Sur Oriente',
---     'SS O''Higgins', 'SS Maule', 'SS Ñuble',
---     'SS Concepción', 'SS Arauco', 'SS Talcahuano', 'SS Biobío',
---     'SS Araucanía Norte', 'SS Araucanía Sur',
---     'SS Los Ríos', 'SS Osorno', 'SS Del Reloncaví', 'SS Chiloé',
---     'SS Aysén', 'SS Magallanes'
--- )
--- GROUP BY ss_id
--- ORDER BY n_registros DESC;
--- -----------------------------------------------------------------
