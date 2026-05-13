@@ -23,9 +23,16 @@ import logging
 from pathlib import Path
 from argparse import ArgumentParser
 
+# ── Ruta raíz del proyecto en sys.path (necesario para importar catalogos) ──
+_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
+
+from pipeline.config.catalogos import SS_CANONICOS  # M1: import centralizado
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 
@@ -52,28 +59,13 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD", ""),
 }
 
-# Transformaciones en orden de ejecución
 SQL_DIR = Path("sql/transformations")
 TRANSFORMATIONS = [
     SQL_DIR / "normalize_services.sql",
     SQL_DIR / "clean_waitlists.sql",
 ]
 
-# Catálogo vigente de 29 SS — debe mantenerse sincronizado con
-# normalize_services.sql, excel_a_sql.py y validacion.py.
-SS_CANONICOS = {
-    'SS Arica y Parinacota', 'SS Tarapacá', 'SS Antofagasta',
-    'SS Atacama', 'SS Coquimbo',
-    'SS Viña del Mar - Quillota', 'SS Valparaíso - San Antonio', 'SS Aconcagua',
-    'SS Metropolitano Norte', 'SS Metropolitano Occidente',
-    'SS Metropolitano Central', 'SS Metropolitano Oriente',
-    'SS Metropolitano Sur', 'SS Metropolitano Sur Oriente',
-    "SS O'Higgins", 'SS Maule', 'SS Ñuble',
-    'SS Concepción', 'SS Arauco', 'SS Talcahuano', 'SS Biobío',
-    'SS Araucanía Norte', 'SS Araucanía Sur',
-    'SS Los Ríos', 'SS Osorno', 'SS Del Reloncaví', 'SS Chiloé',
-    'SS Aysén', 'SS Magallanes',
-}
+# M1: SS_CANONICOS importado desde pipeline.config.catalogos
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -88,21 +80,79 @@ def parse_args():
     return parser.parse_args()
 
 
-def split_statements(sql: str) -> list:
+def split_statements(sql: str) -> list[str]:
     """
-    Divide el contenido de un archivo SQL en sentencias individuales.
-    Ignora líneas de solo comentarios y sentencias vacías.
+    M4: Divide SQL en sentencias individuales respetando literales de texto.
+
+    La versión anterior usaba sql.split(';') a ciegas, lo que rompería
+    ante cualquier literal de string que contuviera un punto y coma
+    (ej: mensajes de error, URLs, etc.).
+
+    Esta implementación recorre el SQL caracter a caracter y respeta:
+      - Literales de comilla simple ('...')  con escape por duplicación ('')
+      - Literales de comilla doble ("...")  con escape por duplicación ("")
+      - Comentarios de línea (--)
+
+    No soporta dollar-quoting ($$ ... $$) ya que no se usa en este proyecto.
     """
-    raw_statements = sql.split(";")
-    statements = []
-    for stmt in raw_statements:
-        clean = stmt.strip()
-        non_comment = "\n".join(
-            line for line in clean.splitlines()
-            if line.strip() and not line.strip().startswith("--")
-        ).strip()
-        if non_comment:
-            statements.append(clean)
+    statements: list[str] = []
+    buf: list[str] = []
+    i = 0
+    n = len(sql)
+
+    while i < n:
+        ch = sql[i]
+
+        # Comentario de línea: avanzar hasta fin de línea (sin agregar al buffer)
+        if ch == '-' and i + 1 < n and sql[i + 1] == '-':
+            while i < n and sql[i] != '\n':
+                buf.append(sql[i])
+                i += 1
+            continue
+
+        # Literal de texto (comilla simple o doble)
+        if ch in ("'", '"'):
+            q = ch
+            buf.append(ch)
+            i += 1
+            while i < n:
+                c2 = sql[i]
+                buf.append(c2)
+                i += 1
+                if c2 == q:
+                    # Comilla duplicada = escape dentro del literal
+                    if i < n and sql[i] == q:
+                        buf.append(sql[i])
+                        i += 1
+                    else:
+                        break  # fin del literal
+            continue
+
+        # Separador de sentencia
+        if ch == ';':
+            stmt = ''.join(buf).strip()
+            meaningful = '\n'.join(
+                ln for ln in stmt.splitlines()
+                if ln.strip() and not ln.strip().startswith('--')
+            ).strip()
+            if meaningful:
+                statements.append(stmt)
+            buf = []
+            i += 1
+            continue
+
+        buf.append(ch)
+        i += 1
+
+    # Última sentencia (puede no tener ';' final)
+    stmt = ''.join(buf).strip()
+    meaningful = '\n'.join(
+        ln for ln in stmt.splitlines()
+        if ln.strip() and not ln.strip().startswith('--')
+    ).strip()
+    if meaningful:
+        statements.append(stmt)
+
     return statements
 
 
@@ -110,8 +160,6 @@ def execute_sql_file(conn, filepath: Path) -> dict:
     """
     Ejecuta todas las sentencias DML de un archivo SQL dentro de una
     transacción. Retorna estadísticas de ejecución.
-    Los SELECT de diagnóstico (sin rowcount > 0) se ejecutan pero
-    sus resultados se descartan — están pensados como referencia, no como log.
     """
     if not filepath.exists():
         raise FileNotFoundError(f"Archivo SQL no encontrado: {filepath}")
@@ -164,9 +212,6 @@ def log_pipeline_run(conn, archivo: str, trimestre: str, estado: str,
 
 
 def print_post_transform_report(conn, trimestre):
-    """
-    Muestra un resumen del estado de los datos tras las transformaciones.
-    """
     log.info("")
     log.info("── Resumen post-transformación")
 
@@ -174,12 +219,10 @@ def print_post_transform_report(conn, trimestre):
     wh_and  = "AND trimestre = %s"   if trimestre else ""
     params  = [trimestre] if trimestre else []
 
-    # Construir cláusula IN con el catálogo canónico
     placeholders = ", ".join(["%s"] * len(SS_CANONICOS))
     ss_list = list(SS_CANONICOS)
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        # ss_id sin reconocer
         cur.execute(f"""
             SELECT COUNT(DISTINCT ss_id) AS ss_no_reconocidos
             FROM listas_espera_ss_trimestre
@@ -188,7 +231,6 @@ def print_post_transform_report(conn, trimestre):
         """, ss_list + params)
         ss_issues = cur.fetchone()["ss_no_reconocidos"]
 
-        # Alertas activas
         cur.execute(f"""
             SELECT COUNT(*) AS alertas
             FROM listas_espera_ss_trimestre
@@ -197,7 +239,6 @@ def print_post_transform_report(conn, trimestre):
         """, params)
         alertas = cur.fetchone()["alertas"]
 
-        # Completitud de asimetria
         cur.execute(f"""
             SELECT
                 COUNT(*) FILTER (WHERE promedio_dias IS NOT NULL

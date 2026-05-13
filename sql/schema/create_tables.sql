@@ -6,6 +6,11 @@
 --
 -- Requisitos: PostgreSQL >= 12
 -- Ejecución : psql -U <usuario> -d <base> -f sql/schema/create_tables.sql
+--
+-- M7: Los campos de conteo (personas, registros) usan BIGINT en lugar
+-- de NUMERIC(10,0). BIGINT es semánticamente correcto para enteros,
+-- más eficiente en aritmética y consistente con pipeline_runs.
+-- Para instalaciones existentes, usar sql/migrations/001_numeric_to_bigint.sql
 -- =================================================================
 -- -----------------------------------------------------------------
 -- Tabla 1: listas_espera_ss_trimestre
@@ -17,24 +22,24 @@ CREATE TABLE IF NOT EXISTS listas_espera_ss_trimestre (
     trimestre TEXT NOT NULL,
     tipo_prestacion TEXT NOT NULL,
     -- Volumen
-    personas_espera NUMERIC(10, 0),
-    -- Personas únicas en lista activa
-    registros_espera NUMERIC(10, 0),
-    -- Registros totales (puede superar personas)
+    personas_espera BIGINT,
+    -- M7: BIGINT (era NUMERIC(10,0))
+    registros_espera BIGINT,
+    -- M7: BIGINT
     -- Tiempos de espera
     mediana_dias NUMERIC(8, 1),
     promedio_dias NUMERIC(8, 1),
     asimetria NUMERIC(8, 1),
     -- Calculada en ingesta: promedio - mediana
     -- Antigüedad extrema (tramos independientes, calculados en registros)
-    reg_24a36m NUMERIC(10, 0),
-    -- Registros con 24–36 meses de espera
-    reg_mayor_36m NUMERIC(10, 0),
-    -- Registros con >36 meses de espera
+    reg_24a36m BIGINT,
+    -- M7: BIGINT  →  registros 24–36 meses
+    reg_mayor_36m BIGINT,
+    -- M7: BIGINT  →  registros >36 meses
     -- Trazabilidad
     fuente TEXT,
     observaciones TEXT,
-    -- Auditoría
+    -- Auditoría (updated_at lo gestiona el trigger trg_listas_espera_updated_at)
     ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -46,7 +51,8 @@ CREATE TABLE IF NOT EXISTS personas_nacional_trimestre (
     id SERIAL,
     trimestre TEXT NOT NULL,
     tipo_prestacion TEXT NOT NULL,
-    personas_total NUMERIC(10, 0),
+    personas_total BIGINT,
+    -- M7: BIGINT (era NUMERIC(10,0))
     ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -59,7 +65,8 @@ CREATE TABLE IF NOT EXISTS nivel_atencion_trimestre (
     nivel_atencion TEXT NOT NULL,
     trimestre TEXT NOT NULL,
     tipo_prestacion TEXT NOT NULL,
-    registros_total_nivel NUMERIC(10, 0),
+    registros_total_nivel BIGINT,
+    -- M7: BIGINT (era NUMERIC(10,0))
     ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

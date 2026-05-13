@@ -26,10 +26,17 @@ import sys
 import logging
 from pathlib import Path
 
+# ── Ruta raíz del proyecto en sys.path (necesario para importar catalogos) ──
+_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
+
+from pipeline.config.catalogos import SS_ID_MAP  # M1: import centralizado
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 
@@ -122,72 +129,7 @@ TIPO_PRESTACION_MAP = {
     "quirúrgica":                       "IQ",
 }
 
-# Catálogo vigente de 29 Servicios de Salud.
-# Cambios históricos cubiertos:
-#   Arica / SS Arica          → SS Arica y Parinacota
-#   Iquique / SS Iquique       → SS Tarapacá
-#   Valdivia / SS Valdivia     → SS Los Ríos
-SS_ID_MAP = {
-    # ── Extremo Norte ──────────────────────────────────────────────
-    "arica":                            "SS Arica y Parinacota",
-    "arica y parinacota":               "SS Arica y Parinacota",
-    "ss arica":                         "SS Arica y Parinacota",   # nombre anterior
-    "iquique":                          "SS Tarapacá",             # nombre anterior
-    "tarapaca":                         "SS Tarapacá",
-    "tarapacá":                         "SS Tarapacá",
-    # ── Norte ──────────────────────────────────────────────────────
-    "antofagasta":                      "SS Antofagasta",
-    "atacama":                          "SS Atacama",
-    "coquimbo":                         "SS Coquimbo",
-    # ── Centro-Norte ───────────────────────────────────────────────
-    "viña del mar quillota":            "SS Viña del Mar - Quillota",
-    "viña del mar - quillota":          "SS Viña del Mar - Quillota",
-    "vina del mar quillota":            "SS Viña del Mar - Quillota",
-    "valparaiso san antonio":           "SS Valparaíso - San Antonio",
-    "valparaíso san antonio":           "SS Valparaíso - San Antonio",
-    "valparaíso - san antonio":         "SS Valparaíso - San Antonio",
-    "aconcagua":                        "SS Aconcagua",
-    # ── Metropolitana ──────────────────────────────────────────────
-    "metropolitano norte":              "SS Metropolitano Norte",
-    "metropolitano occidente":          "SS Metropolitano Occidente",
-    "metropolitano central":            "SS Metropolitano Central",
-    "metropolitano oriente":            "SS Metropolitano Oriente",
-    "metropolitano sur":                "SS Metropolitano Sur",
-    "metropolitano sur oriente":        "SS Metropolitano Sur Oriente",
-    # ── Centro-Sur ─────────────────────────────────────────────────
-    "o'higgins":                        "SS O'Higgins",
-    "ohiggins":                         "SS O'Higgins",
-    "maule":                            "SS Maule",
-    "ñuble":                            "SS Ñuble",
-    "nuble":                            "SS Ñuble",
-    # ── Biobío ─────────────────────────────────────────────────────
-    "concepcion":                       "SS Concepción",
-    "concepción":                       "SS Concepción",
-    "arauco":                           "SS Arauco",
-    "talcahuano":                       "SS Talcahuano",
-    "biobio":                           "SS Biobío",
-    "biobío":                           "SS Biobío",
-    # ── Araucanía ──────────────────────────────────────────────────
-    "araucania norte":                  "SS Araucanía Norte",
-    "araucanía norte":                  "SS Araucanía Norte",
-    "araucania sur":                    "SS Araucanía Sur",
-    "araucanía sur":                    "SS Araucanía Sur",
-    # ── Sur ────────────────────────────────────────────────────────
-    "valdivia":                         "SS Los Ríos",             # nombre anterior
-    "los rios":                         "SS Los Ríos",
-    "los ríos":                         "SS Los Ríos",
-    "osorno":                           "SS Osorno",
-    "del reloncavi":                    "SS Del Reloncaví",
-    "del reloncaví":                    "SS Del Reloncaví",
-    "reloncavi":                        "SS Del Reloncaví",
-    "reloncaví":                        "SS Del Reloncaví",
-    "chiloe":                           "SS Chiloé",
-    "chiloé":                           "SS Chiloé",
-    # ── Austral ────────────────────────────────────────────────────
-    "aysen":                            "SS Aysén",
-    "aysén":                            "SS Aysén",
-    "magallanes":                       "SS Magallanes",
-}
+# SS_ID_MAP importado desde pipeline.config.catalogos (M1)
 
 # ── Funciones auxiliares ───────────────────────────────────────────────────────
 
@@ -220,13 +162,17 @@ def clean_numeric(val) -> float | None:
     Convierte un valor a float tolerando formatos numéricos post-OCR.
 
     Formatos manejados:
-        "1234"      → 1234.0   (entero sin separador)
-        "1234,5"    → 1234.5   (decimal con coma — formato europeo/chileno)
-        "1234.5"    → 1234.5   (decimal con punto — formato anglosajón)
-        "1.234,5"   → 1234.5   (miles con punto, decimal con coma)
-        "1,234.5"   → 1234.5   (miles con coma, decimal con punto)
-        "N/D", "-"  → None     (valores no disponibles)
-        ""          → None
+        "1234"      → 1234.0
+        "1234,5"    → 1234.5  (coma decimal — OCR configurado sin sep. de miles)
+        "1234.5"    → 1234.5  (punto decimal)
+        "1.234,5"   → 1234.5  (punto miles + coma decimal, ambos presentes)
+        "1,234.5"   → 1234.5  (coma miles + punto decimal, ambos presentes)
+        "N/D", "-"  → None
+        Negativos   → None (aberrantes en este dominio; se loguean)  [C2]
+
+    Nota M2: el OCR está configurado explícitamente para NO usar coma ni punto
+    como separador de miles. Por eso, cuando hay una sola coma, se trata siempre
+    como separador decimal independientemente de cuántos dígitos haya tras ella.
     """
     if pd.isna(val):
         return None
@@ -238,20 +184,37 @@ def clean_numeric(val) -> float | None:
         return None
 
     if ',' in s and '.' in s:
+        # Ambos separadores → punto=miles, coma=decimal
         s = s.replace('.', '').replace(',', '.')
     elif ',' in s:
         parts = s.split(',')
-        if len(parts) == 2 and len(parts[1]) <= 2:
+        if len(parts) == 2:
+            # M2: OCR garantiza que la coma es separador decimal (nunca de miles).
+            # Se elimina la restricción anterior de <= 2 dígitos para evitar
+            # que "0,365" → 365 en lugar de 0.365.
             s = s.replace(',', '.')
         else:
+            # Múltiples comas: dato corrupto, descartar
             s = s.replace(',', '')
+
     s = re.sub(r'[^\d.\-]', '', s)
     if not s or s == '.':
         return None
+
     try:
-        return float(s)
+        result = float(s)
     except ValueError:
         return None
+
+    # C2: valores negativos son aberrantes en este dominio (días de espera,
+    # conteos de personas). Se descartan como NULL con advertencia en el log,
+    # evitando que un valor OCR erróneo viole el CHECK CONSTRAINT de PostgreSQL
+    # y provoque un rollback del archivo completo.
+    if result < 0:
+        log.warning(f"  Valor negativo descartado como NULL: '{val}'")
+        return None
+
+    return result
 
 
 def is_total_row(val) -> bool:
@@ -274,6 +237,7 @@ def normalize_ss_id(val) -> str | None:
     """
     Normaliza el nombre del Servicio de Salud al estándar vigente (29 SS).
     Cubre nombres históricos (Arica, Iquique, Valdivia) y variantes de OCR.
+    SS_ID_MAP importado desde pipeline.config.catalogos.
     """
     if pd.isna(val):
         return None
@@ -282,7 +246,6 @@ def normalize_ss_id(val) -> str | None:
     if is_total_row(raw):
         return None
 
-    # Quitar prefijo "S.S." / "SS " / "Servicio de Salud " para normalizar la clave
     key = re.sub(r'^servicio\s+de\s+salud\s+', '', raw.lower()).strip()
     key = re.sub(r'^s\.?\s*s\.?\s*', '', key).strip()
     key = re.sub(r'\s+', ' ', key)
@@ -290,7 +253,6 @@ def normalize_ss_id(val) -> str | None:
     if key in SS_ID_MAP:
         return SS_ID_MAP[key]
 
-    # Búsqueda parcial como fallback
     for k, v in SS_ID_MAP.items():
         if k in key or key in k:
             log.debug(f"  ss_id '{raw}' → '{v}' (coincidencia parcial)")
@@ -321,7 +283,6 @@ def read_sheet(xl: pd.ExcelFile, sheet_name: str) -> pd.DataFrame | None:
 # ── Funciones de procesamiento por tabla ──────────────────────────────────────
 
 def _filter_total_rows(df: pd.DataFrame, col: str, tabla: str) -> pd.DataFrame:
-    """Elimina filas de totales/subtotales en la columna indicada."""
     n_pre = len(df)
     df = df[~df[col].apply(is_total_row)]
     n_dropped = n_pre - len(df)
@@ -381,9 +342,10 @@ def process_personas_nacional(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
             f"Columnas disponibles: {list(df.columns)}"
         )
 
-    # Filtrar filas de totales si la hoja tiene columna identificable
-    if "personas_total" in df.columns:
-        df = _filter_total_rows(df, "tipo_prestacion", "personas_nacional")
+    # M3: el filtro actúa sobre tipo_prestacion, no sobre personas_total.
+    # La condición correcta es verificar que tipo_prestacion exista (garantizado
+    # por el check anterior), haciendo el filtro siempre aplicable.
+    df = _filter_total_rows(df, "tipo_prestacion", "personas_nacional")
 
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
     df = df.dropna(subset=["tipo_prestacion"])

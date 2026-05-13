@@ -19,10 +19,17 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+# ── Ruta raíz del proyecto en sys.path (necesario para importar catalogos) ──
+_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
 from tabulate import tabulate
+
+from pipeline.config.catalogos import SS_CANONICOS, SS_ESPECIALES, NIVELES_ATENCION  # M1
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 
@@ -48,41 +55,10 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD", ""),
 }
 
-# Catálogo vigente de Servicios de Salud según última Glosa 06.
-# 29 servicios — fuente de verdad para validación de cobertura.
-SS_ESPERADOS = {
-    "SS Arica y Parinacota",
-    "SS Tarapacá",
-    "SS Antofagasta",
-    "SS Atacama",
-    "SS Coquimbo",
-    "SS Valparaíso - San Antonio",
-    "SS Viña del Mar - Quillota",
-    "SS Aconcagua",
-    "SS Metropolitano Norte",
-    "SS Metropolitano Occidente",
-    "SS Metropolitano Central",
-    "SS Metropolitano Oriente",
-    "SS Metropolitano Sur",
-    "SS Metropolitano Sur Oriente",
-    "SS O'Higgins",
-    "SS Maule",
-    "SS Ñuble",
-    "SS Concepción",
-    "SS Arauco",
-    "SS Talcahuano",
-    "SS Biobío",
-    "SS Araucanía Norte",
-    "SS Araucanía Sur",
-    "SS Los Ríos",
-    "SS Osorno",
-    "SS Del Reloncaví",
-    "SS Chiloé",
-    "SS Aysén",
-    "SS Magallanes",
-}
-
-SS_ESPECIALES = {"No definido", "NO DEFINIDO", "Sin asignar"}
+# M1: catálogo importado desde pipeline.config.catalogos
+# SS_CANONICOS  → 29 servicios estándar vigentes
+# SS_ESPECIALES → valores admitidos pero no estándar ('No definido', etc.)
+# NIVELES_ATENCION → {'Primario', 'Secundario', 'Terciario'}
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -116,7 +92,6 @@ def fmt_table(rows: list, floatfmt=".1f") -> str:
 
 
 def trimestre_filter(trimestre):
-    """Retorna cláusula WHERE y parámetros según si hay filtro de trimestre."""
     if trimestre:
         return "WHERE trimestre = %s", [trimestre]
     return "", []
@@ -125,7 +100,6 @@ def trimestre_filter(trimestre):
 # ── Checks ─────────────────────────────────────────────────────────────────────
 
 def check_cobertura_tablas(conn, trimestre) -> int:
-    """Cuántas filas hay en cada tabla, por trimestre y tipo de prestación."""
     wh, params = trimestre_filter(trimestre)
 
     for tabla in ("listas_espera_ss_trimestre",
@@ -164,10 +138,10 @@ def check_servicios_por_trimestre(conn, trimestre) -> int:
         esp = r["n_ss_especiales"]
         t = f"{r['trimestre']} / {r['tipo_prestacion']}"
         sufijo = f" + {esp} entrada(s) especial(es) ('No definido')" if esp else ""
-        if n == len(SS_ESPERADOS):
+        if n == len(SS_CANONICOS):
             ok(f"{t}: {n} servicios ✓{sufijo}")
         else:
-            warn(f"{t}: {n} de {len(SS_ESPERADOS)} servicios esperados{sufijo}")
+            warn(f"{t}: {n} de {len(SS_CANONICOS)} servicios esperados{sufijo}")
     return errors
 
 
@@ -180,7 +154,7 @@ def check_ss_no_estandarizados(conn, trimestre) -> int:
     """, params)
 
     ss_encontrados = {r["ss_id"] for r in rows}
-    fuera_catalogo = ss_encontrados - SS_ESPERADOS - SS_ESPECIALES
+    fuera_catalogo = ss_encontrados - SS_CANONICOS - SS_ESPECIALES
 
     if not fuera_catalogo:
         ok(f"Todos los ss_id están en el catálogo ({len(ss_encontrados - SS_ESPECIALES)} estándar)")
@@ -189,6 +163,36 @@ def check_ss_no_estandarizados(conn, trimestre) -> int:
     for ss in sorted(fuera_catalogo):
         warn(f"ss_id fuera de catálogo: '{ss}' — revisar normalización")
     return len(fuera_catalogo)
+
+
+def check_niveles_atencion(conn, trimestre) -> int:
+    """
+    Valida que los valores de nivel_atencion sean exactamente los esperados.
+
+    Si el OCR extrae 'Alta Complejidad' o 'Nivel 3' en vez de 'Terciario',
+    el registro se carga pero NO contribuye a v_pct_nivel_terciario sin alerta.
+    Este check detecta esas discrepancias antes de que afecten los análisis.
+    """
+    wh, params = trimestre_filter(trimestre)
+    rows = query(conn, f"""
+        SELECT DISTINCT nivel_atencion
+        FROM nivel_atencion_trimestre {wh}
+        ORDER BY nivel_atencion
+    """, params)
+
+    niveles_encontrados = {r["nivel_atencion"] for r in rows}
+    fuera_catalogo = niveles_encontrados - NIVELES_ATENCION
+
+    if not fuera_catalogo:
+        ok(f"Todos los niveles de atención están en el catálogo: {sorted(niveles_encontrados)}")
+        return 0
+
+    for nivel in sorted(fuera_catalogo):
+        warn(
+            f"nivel_atencion fuera de catálogo: '{nivel}' — "
+            "no contribuirá a v_pct_nivel_terciario. Revisar OCR."
+        )
+    return 0  # warning, no error crítico (no bloquea el pipeline)
 
 
 def check_coherencia_antiguedad(conn, trimestre) -> int:
@@ -229,7 +233,6 @@ def check_coherencia_antiguedad(conn, trimestre) -> int:
 
 
 def check_asimetria(conn, trimestre) -> int:
-    """La columna asimetria debe coincidir con promedio_dias - mediana_dias."""
     wh_and = "AND trimestre = %s" if trimestre else ""
     params = [trimestre] if trimestre else []
 
@@ -253,11 +256,10 @@ def check_asimetria(conn, trimestre) -> int:
 
     warn(f"{len(rows)} fila(s) con asimetría inconsistente (diferencia > 0.5 días):")
     log.warning(fmt_table(rows))
-    return 0  # warning, no error crítico
+    return 0
 
 
 def check_outliers(conn, trimestre) -> int:
-    """Detecta valores extremos que pueden indicar errores de OCR."""
     wh_and = "AND trimestre = %s" if trimestre else ""
     params = [trimestre] if trimestre else []
 
@@ -296,7 +298,6 @@ def check_outliers(conn, trimestre) -> int:
 
 
 def check_nulos_criticos(conn, trimestre) -> int:
-    """Reporta nulos por trimestre. Los nulos son esperados según limitaciones.md."""
     wh, params = trimestre_filter(trimestre)
 
     rows = query(conn, f"""
@@ -312,11 +313,10 @@ def check_nulos_criticos(conn, trimestre) -> int:
 
     log.info(fmt_table(rows))
     ok("Nulos esperados documentados en docs/limitaciones.md")
-    return 0  # Los nulos son esperados — se reportan pero no son errores
+    return 0
 
 
 def check_pipeline_runs(conn, trimestre) -> int:
-    """Muestra el historial reciente de cargas."""
     wh, params = trimestre_filter(trimestre)
     rows = query(conn, f"""
         SELECT run_at::date AS fecha,
@@ -350,6 +350,7 @@ CHECKS = [
     ("Cobertura de tablas por trimestre y tipo",        check_cobertura_tablas,        "info"),
     ("Servicios de Salud por trimestre",                check_servicios_por_trimestre,  "warning"),
     ("ss_id fuera del catálogo estándar",               check_ss_no_estandarizados,     "warning"),
+    ("Niveles de atención fuera del catálogo",          check_niveles_atencion,         "warning"),
     ("Coherencia de tramos de antigüedad",              check_coherencia_antiguedad,    "error"),
     ("Consistencia de columna asimetria",               check_asimetria,                "warning"),
     ("Outliers en valores numéricos",                   check_outliers,                 "warning"),
