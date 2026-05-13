@@ -19,9 +19,7 @@ CREATE TABLE IF NOT EXISTS listas_espera_ss_trimestre (
     tipo_prestacion TEXT NOT NULL,
     -- Volumen
     personas_espera BIGINT,
-    -- M7: BIGINT (era NUMERIC(10,0))
     registros_espera BIGINT,
-    -- M7: BIGINT
     -- Tiempos de espera
     mediana_dias NUMERIC(8, 1),
     promedio_dias NUMERIC(8, 1),

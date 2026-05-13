@@ -26,7 +26,7 @@ import psycopg2.extras
 from dotenv import load_dotenv
 from tabulate import tabulate
 
-from pipeline.config.catalogos import SS_CANONICOS, SS_ESPECIALES, NIVELES_ATENCION  # M1
+from pipeline.config.catalogos import SS_CANONICOS, SS_ESPECIALES, NIVELES_ATENCION  
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 

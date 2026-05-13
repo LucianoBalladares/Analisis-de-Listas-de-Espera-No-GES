@@ -29,7 +29,7 @@ import psycopg2
 import psycopg2.extras
 from dotenv import load_dotenv
 
-from pipeline.config.catalogos import SS_CANONICOS  # M1: import centralizado
+from pipeline.config.catalogos import SS_CANONICOS  
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 

@@ -33,7 +33,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 
-from pipeline.config.catalogos import SS_ID_MAP  # M1: import centralizado
+from pipeline.config.catalogos import SS_ID_MAP 
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 
@@ -126,7 +126,7 @@ TIPO_PRESTACION_MAP = {
     "quirúrgica":                       "IQ",
 }
 
-# SS_ID_MAP importado desde pipeline.config.catalogos (M1)
+# SS_ID_MAP importado desde pipeline.config.catalogos
 
 # ── Funciones auxiliares ───────────────────────────────────────────────────────
 
@@ -165,7 +165,7 @@ def clean_numeric(val) -> float | None:
         "1.234,5"   → 1234.5  (punto miles + coma decimal, ambos presentes)
         "1,234.5"   → 1234.5  (coma miles + punto decimal, ambos presentes)
         "N/D", "-"  → None
-        Negativos   → None (aberrantes en este dominio; se loguean)  [C2]
+        Negativos   → None (aberrantes en este dominio; se loguean)  
 
     """
     if pd.isna(val):
