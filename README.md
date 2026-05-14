@@ -109,13 +109,17 @@ cp .env.example .env   # completar DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWO
 
 ### 3. Inicializar la base de datos (una sola vez)
 
-Ejecutar los archivos SQL en este orden:
-
 ```bash
+# 1. Crear la base de datos
+psql -U postgres -c "CREATE DATABASE listas_espera_ges;"
+
+# 2. Esquema: tablas → constraints → índices → triggers
 psql -U postgres -d listas_espera_ges -f sql/schema/create_tables.sql
 psql -U postgres -d listas_espera_ges -f sql/schema/constraints.sql
 psql -U postgres -d listas_espera_ges -f sql/schema/indexes.sql
 psql -U postgres -d listas_espera_ges -f sql/schema/triggers.sql
+
+# 3. Vistas para Power BI
 psql -U postgres -d listas_espera_ges -f sql/views/dashboard_views.sql
 ```
 

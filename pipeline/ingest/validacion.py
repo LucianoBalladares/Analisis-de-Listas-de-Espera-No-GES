@@ -16,7 +16,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-# ── Ruta raíz del proyecto en sys.path (necesario para importar catalogos) ──
+# ── Ruta raíz derivada de la ubicación del script (no del CWD) ───────────────
 _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -26,20 +26,21 @@ import psycopg2.extras
 from dotenv import load_dotenv
 from tabulate import tabulate
 
-from pipeline.config.catalogos import SS_CANONICOS, SS_ESPECIALES, NIVELES_ATENCION  
+from pipeline.config.catalogos import SS_CANONICOS, SS_ESPECIALES, NIVELES_ATENCION
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 
 load_dotenv()
 
-Path("pipeline/logs").mkdir(parents=True, exist_ok=True)
+LOG_DIR = _ROOT / "pipeline" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("pipeline/logs/validacion.log", encoding="utf-8"),
+        logging.FileHandler(LOG_DIR / "validacion.log", encoding="utf-8"),
     ],
 )
 log = logging.getLogger(__name__)
@@ -51,11 +52,6 @@ DB_CONFIG = {
     "user":     os.getenv("DB_USER", "postgres"),
     "password": os.getenv("DB_PASSWORD", ""),
 }
-
-# Catálogo importado desde pipeline.config.catalogos
-# SS_CANONICOS  → 29 servicios estándar vigentes
-# SS_ESPECIALES → valores admitidos pero no estándar ('No definido', etc.)
-# NIVELES_ATENCION → {'Primario', 'Secundario', 'Terciario'}
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -83,6 +79,8 @@ def error(msg): log.error(f"  ✗ {msg}")
 def fmt_table(rows: list, floatfmt=".1f") -> str:
     if not rows:
         return "  (sin resultados)"
+    if not hasattr(rows[0], "keys"):
+        return "  (formato de fila inesperado)"
     headers = list(rows[0].keys())
     data = [[r[h] for h in headers] for r in rows]
     return tabulate(data, headers=headers, tablefmt="simple", floatfmt=floatfmt)
@@ -164,13 +162,17 @@ def check_ss_no_estandarizados(conn, trimestre) -> int:
 
 def check_niveles_atencion(conn, trimestre) -> int:
     """
-    Valida que los valores de nivel_atencion sean exactamente los esperados.
+    Valida que los valores de nivel_atencion sean exactamente los esperados
+    ('Primario', 'Secundario', 'Terciario').
 
-    Si el OCR extrae 'Alta Complejidad' o 'Nivel 3' en vez de 'Terciario',
-    el registro se carga pero NO contribuye a v_pct_nivel_terciario sin alerta.
-    Este check detecta esas discrepancias antes de que afecten los análisis.
+    Si el OCR extrae variantes no estándar (ej: 'Alta Complejidad', 'Nivel 3'),
+    el registro se carga pero NO contribuye a v_pct_nivel_terciario.
+    Este check cuantifica el impacto real sobre esa vista antes de que
+    afecte los análisis.
     """
     wh, params = trimestre_filter(trimestre)
+    wh_and = "AND trimestre = %s" if trimestre else ""
+
     rows = query(conn, f"""
         SELECT DISTINCT nivel_atencion
         FROM nivel_atencion_trimestre {wh}
@@ -184,12 +186,33 @@ def check_niveles_atencion(conn, trimestre) -> int:
         ok(f"Todos los niveles de atención están en el catálogo: {sorted(niveles_encontrados)}")
         return 0
 
+    # Cuantificar impacto: filas y registros de pacientes afectados
+    placeholders = ", ".join(["%s"] * len(fuera_catalogo))
+    params_fuera = list(fuera_catalogo)
+    count_rows = query(conn, f"""
+        SELECT COUNT(*)                        AS n_filas,
+               COALESCE(SUM(registros_total_nivel), 0) AS registros_afectados
+        FROM nivel_atencion_trimestre
+        WHERE nivel_atencion IN ({placeholders})
+        {wh_and}
+    """, params_fuera + (params if trimestre else []))
+
+    n_filas      = count_rows[0]["n_filas"]      if count_rows else 0
+    n_registros  = count_rows[0]["registros_afectados"] if count_rows else 0
+
     for nivel in sorted(fuera_catalogo):
         warn(
             f"nivel_atencion fuera de catálogo: '{nivel}' — "
-            "no contribuirá a v_pct_nivel_terciario. Revisar OCR."
+            "NO contribuirá a v_pct_nivel_terciario. Revisar OCR."
         )
-    return 0  # warning, no error crítico (no bloquea el pipeline)
+
+    warn(
+        f"Impacto: {n_filas} fila(s) con nivel no reconocido "
+        f"({n_registros:,} registros de pacientes excluidos de v_pct_nivel_terciario). "
+        "El porcentaje de nivel terciario puede estar subestimado."
+    )
+
+    return 0  # Warning, no bloquea el pipeline, pero el impacto queda registrado
 
 
 def check_coherencia_antiguedad(conn, trimestre) -> int:
@@ -197,10 +220,9 @@ def check_coherencia_antiguedad(conn, trimestre) -> int:
     Valida que la suma de los tramos de antigüedad no supere los registros totales.
 
     reg_24a36m y reg_mayor_36m son tramos MUTUAMENTE EXCLUYENTES:
-      - reg_24a36m  → registros con entre 24 y 36 meses de espera
+      - reg_24a36m    → registros con entre 24 y 36 meses de espera
       - reg_mayor_36m → registros con más de 36 meses de espera
-    No existe relación de orden entre ellos. La única restricción válida
-    es que su suma no puede superar registros_espera (el total).
+    La única restricción válida es que su suma no supere registros_espera.
     """
     wh_and = "AND trimestre = %s" if trimestre else ""
     params = [trimestre] if trimestre else []
@@ -383,7 +405,6 @@ def main(trimestre=None):
             except Exception as e:
                 error(f"Error ejecutando el check: {e}")
                 total_errors += 1
-
     finally:
         conn.close()
 

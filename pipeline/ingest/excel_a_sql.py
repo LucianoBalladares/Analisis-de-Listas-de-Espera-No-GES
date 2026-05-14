@@ -14,6 +14,9 @@ Puede contener hasta 3 hojas (ninguna es obligatoria):
 La carga es idempotente: re-correr el script con el mismo archivo
 actualiza los registros existentes (UPSERT), nunca duplica.
 
+Cada hoja se carga en su propia transacción: si una falla, las hojas
+ya confirmadas no se revierten.
+
 Requisitos: Python >= 3.10 (usa sintaxis X | Y para type hints)
 """
 
@@ -23,7 +26,7 @@ import sys
 import logging
 from pathlib import Path
 
-# ── Ruta raíz del proyecto en sys.path (necesario para importar catalogos) ──
+# ── Ruta raíz derivada de la ubicación del script (no del CWD) ───────────────
 _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -33,13 +36,14 @@ import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 
-from pipeline.config.catalogos import SS_ID_MAP 
+from pipeline.config.catalogos import SS_ID_MAP
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 
 load_dotenv()
 
-Path("pipeline/logs").mkdir(parents=True, exist_ok=True)
+LOG_DIR = _ROOT / "pipeline" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,7 +51,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("pipeline/logs/ingesta.log", encoding="utf-8"),
+        logging.FileHandler(LOG_DIR / "ingesta.log", encoding="utf-8"),
     ],
 )
 log = logging.getLogger(__name__)
@@ -165,8 +169,7 @@ def clean_numeric(val) -> float | None:
         "1.234,5"   → 1234.5  (punto miles + coma decimal, ambos presentes)
         "1,234.5"   → 1234.5  (coma miles + punto decimal, ambos presentes)
         "N/D", "-"  → None
-        Negativos   → None (aberrantes en este dominio; se loguean)  
-
+        Negativos   → None (aberrantes en este dominio; se loguean)
     """
     if pd.isna(val):
         return None
@@ -198,10 +201,6 @@ def clean_numeric(val) -> float | None:
     except ValueError:
         return None
 
-    # valores negativos son aberrantes en este dominio (días de espera,
-    # conteos de personas). Se descartan como NULL con advertencia en el log,
-    # evitando que un valor OCR erróneo viole el CHECK CONSTRAINT de PostgreSQL
-    # y provoque un rollback del archivo completo.
     if result < 0:
         log.warning(f"  Valor negativo descartado como NULL: '{val}'")
         return None
@@ -228,7 +227,6 @@ def normalize_tipo_prestacion(val) -> str | None:
 def normalize_ss_id(val) -> str | None:
     """
     Normaliza el nombre del Servicio de Salud al estándar vigente (29 SS).
-    Cubre nombres históricos (Arica, Iquique, Valdivia) y variantes de OCR.
     SS_ID_MAP importado desde pipeline.config.catalogos.
     """
     if pd.isna(val):
@@ -272,7 +270,7 @@ def read_sheet(xl: pd.ExcelFile, sheet_name: str) -> pd.DataFrame | None:
     return df
 
 
-# ── Funciones de procesamiento por tabla ──────────────────────────────────────
+# ── Procesamiento por tabla ────────────────────────────────────────────────────
 
 def _filter_total_rows(df: pd.DataFrame, col: str, tabla: str) -> pd.DataFrame:
     n_pre = len(df)
@@ -294,7 +292,6 @@ def process_listas_espera(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
             )
 
     df = _filter_total_rows(df, "ss_id", "listas_espera")
-
     df["ss_id"] = df["ss_id"].apply(normalize_ss_id)
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
 
@@ -335,7 +332,6 @@ def process_personas_nacional(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
         )
 
     df = _filter_total_rows(df, "tipo_prestacion", "personas_nacional")
-
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
     df = df.dropna(subset=["tipo_prestacion"])
 
@@ -344,7 +340,6 @@ def process_personas_nacional(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
         else None
     )
     df["trimestre"] = trimestre
-
     return df.reset_index(drop=True)
 
 
@@ -359,7 +354,6 @@ def process_nivel_atencion(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
             )
 
     df = _filter_total_rows(df, "nivel_atencion", "nivel_atencion")
-
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
     df["nivel_atencion"] = df["nivel_atencion"].str.strip().str.title()
     df = df.dropna(subset=["nivel_atencion", "tipo_prestacion"])
@@ -370,7 +364,6 @@ def process_nivel_atencion(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
         else None
     )
     df["trimestre"] = trimestre
-
     return df.reset_index(drop=True)
 
 
@@ -490,8 +483,12 @@ def main(filepath: str):
             df_raw = read_sheet(xl, sheet_name)
 
             if df_raw is None:
-                log_pipeline_run(conn, path.name, trimestre, sheet_name,
-                                 0, 0, 0, "warning", "Hoja no encontrada o vacía")
+                try:
+                    log_pipeline_run(conn, path.name, trimestre, sheet_name,
+                                     0, 0, 0, "warning", "Hoja no encontrada o vacía")
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
                 log.info("")
                 continue
 
@@ -504,17 +501,35 @@ def main(filepath: str):
                 estado = "warning" if omitidas > 0 else "ok"
                 log_pipeline_run(conn, path.name, trimestre, sheet_name,
                                  n_raw, cargadas, omitidas, estado)
-
+                conn.commit()   # ← commit por hoja
                 log.info(f"  ✓ {cargadas} filas cargadas | {omitidas} omitidas\n")
 
             except ValueError as e:
+                # Error de estructura (columnas faltantes, formato incorrecto)
+                conn.rollback()
                 log.error(f"  ✗ Error de estructura: {e}\n")
-                log_pipeline_run(conn, path.name, trimestre, sheet_name,
-                                 n_raw, 0, n_raw, "error", str(e))
+                try:
+                    log_pipeline_run(conn, path.name, trimestre, sheet_name,
+                                     n_raw, 0, n_raw, "error", str(e)[:500])
+                    conn.commit()
+                except Exception as log_err:
+                    log.warning(f"  No se pudo registrar error en pipeline_runs: {log_err}")
+                    conn.rollback()
 
-        conn.commit()
+            except psycopg2.Error as e:
+                # Error de base de datos (constraint, timeout, etc.)
+                conn.rollback()
+                log.error(f"  ✗ Error de base de datos en '{sheet_name}': {e}\n")
+                try:
+                    log_pipeline_run(conn, path.name, trimestre, sheet_name,
+                                     n_raw, 0, n_raw, "error", str(e)[:500])
+                    conn.commit()
+                except Exception as log_err:
+                    log.warning(f"  No se pudo registrar error en pipeline_runs: {log_err}")
+                    conn.rollback()
+
         log.info("=" * 62)
-        log.info("  Carga completada y confirmada ✓")
+        log.info("  Carga completada ✓")
         log.info("=" * 62)
 
     except Exception as e:

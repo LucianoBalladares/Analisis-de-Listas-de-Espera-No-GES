@@ -38,9 +38,11 @@ import subprocess
 from argparse import ArgumentParser
 from pathlib import Path
 
-# ── Configuración ──────────────────────────────────────────────────────────────
+# ── Ruta raíz derivada de la ubicación del script (no del CWD) ───────────────
+_ROOT = Path(__file__).resolve().parent.parent.parent
 
-Path("pipeline/logs").mkdir(parents=True, exist_ok=True)
+LOG_DIR = _ROOT / "pipeline" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,15 +50,15 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("pipeline/logs/pipeline_runner.log", encoding="utf-8"),
+        logging.FileHandler(LOG_DIR / "pipeline_runner.log", encoding="utf-8"),
     ],
 )
 log = logging.getLogger(__name__)
 
-# Rutas a los módulos del pipeline (relativas a la raíz del proyecto)
-INGEST_SCRIPT     = Path("pipeline/ingest/excel_a_sql.py")
-VALIDATE_SCRIPT   = Path("pipeline/ingest/validacion.py")
-TRANSFORM_SCRIPT  = Path("pipeline/transform/run_transformations.py")
+# Rutas absolutas a los módulos del pipeline
+INGEST_SCRIPT     = _ROOT / "pipeline" / "ingest"         / "excel_a_sql.py"
+VALIDATE_SCRIPT   = _ROOT / "pipeline" / "ingest"         / "validacion.py"
+TRANSFORM_SCRIPT  = _ROOT / "pipeline" / "transform"      / "run_transformations.py"
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -100,8 +102,6 @@ def run_step(label: str, cmd: list) -> int:
     log.info(f"  Ejecutando: {' '.join(str(c) for c in cmd)}")
     result = subprocess.run(
         [sys.executable] + [str(c) for c in cmd],
-        # Heredar stdout/stderr para que los logs de cada módulo
-        # aparezcan en la consola en tiempo real
     )
     return result.returncode
 
@@ -135,8 +135,11 @@ def main():
 
     for script in (INGEST_SCRIPT, VALIDATE_SCRIPT, TRANSFORM_SCRIPT):
         if not script.exists():
-            log.error(f"Script no encontrado: {script}. "
-                      "Verifica que estás ejecutando desde la raíz del proyecto.")
+            log.error(
+                f"Script no encontrado: {script}\n"
+                f"  Raíz del proyecto detectada: {_ROOT}\n"
+                "  Verifica que la estructura del repositorio es la esperada."
+            )
             sys.exit(1)
 
     # ── Cabecera ───────────────────────────────────────────────────────────────
@@ -155,7 +158,7 @@ def main():
 
     if rc_ingesta != 0:
         log.error("  ✗ La ingesta falló con errores críticos.")
-        log.error("  Pipeline detenido. Revisar pipeline/logs/ingesta.log")
+        log.error(f"  Pipeline detenido. Revisar {LOG_DIR / 'ingesta.log'}")
         _resumen(resultados, trimestre)
         sys.exit(1)
 
@@ -173,7 +176,7 @@ def main():
         else:
             log.error("  ✗ La validación reportó errores críticos.")
             log.error("  Usa --force para continuar de todas formas.")
-            log.error("  Revisar pipeline/logs/validacion.log")
+            log.error(f"  Revisar {LOG_DIR / 'validacion.log'}")
             _resumen(resultados, trimestre)
             sys.exit(1)
     else:
@@ -194,7 +197,7 @@ def main():
 
         if rc_transform != 0:
             log.error("  ✗ Las transformaciones finalizaron con errores.")
-            log.error("  Revisar pipeline/logs/transformaciones.log")
+            log.error(f"  Revisar {LOG_DIR / 'transformaciones.log'}")
         else:
             log.info("  ✓ Transformaciones completadas correctamente")
 
@@ -207,7 +210,7 @@ def main():
 
 def _resumen(resultados: dict, trimestre: str):
     separator(f"Resumen — {trimestre}")
-    iconos = {0: "✓", 1: "✗", None: "—"}
+    iconos  = {0: "✓", 1: "✗", None: "—"}
     estados = {0: "OK", 1: "ERROR", None: "OMITIDO"}
     for paso, rc in resultados.items():
         icono  = iconos.get(rc if rc in (0, None) else 1, "✗")

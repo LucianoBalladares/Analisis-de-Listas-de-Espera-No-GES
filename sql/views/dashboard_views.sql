@@ -157,12 +157,20 @@ GROUP BY trimestre,
 -- 5. Mapa de disponibilidad de indicadores
 -- Muestra qué indicadores tienen datos en cada período.
 -- Útil para marcar visualmente datos faltantes en Power BI.
+--
+-- CAMBIO respecto a la versión anterior:
+--   Se añaden columnas n_ss_con_* / n_ss_sin_* para exponer la
+--   disponibilidad a nivel de Servicio de Salud, no solo como
+--   booleano agregado de período. Esto permite en Power BI detectar
+--   períodos donde la mayoría de SS tiene el dato pero alguno no,
+--   en lugar de ver solo TRUE/FALSE para todo el período.
 -- -----------------------------------------------------------------
 CREATE OR REPLACE VIEW v_disponibilidad_indicadores AS
 SELECT l.trimestre,
     l.tipo_prestacion,
     COUNT(*) AS n_ss_cargados,
-    -- Disponibilidad por indicador (TRUE = al menos 1 SS tiene el dato)
+    -- ── Disponibilidad booleana por indicador ─────────────────────
+    -- TRUE = al menos 1 SS tiene el dato en ese período
     BOOL_OR(l.mediana_dias IS NOT NULL) AS mediana_disponible,
     BOOL_OR(l.promedio_dias IS NOT NULL) AS promedio_disponible,
     BOOL_OR(l.asimetria IS NOT NULL) AS asimetria_disponible,
@@ -174,6 +182,35 @@ SELECT l.trimestre,
         l.reg_24a36m IS NOT NULL
         AND l.reg_mayor_36m IS NOT NULL
     ) AS antiguedad_completa_disponible,
+    -- ── Conteos de SS con/sin dato (granularidad para filtros) ────
+    -- Permite detectar períodos donde algunos SS tienen el dato y otros no.
+    COUNT(*) FILTER (
+        WHERE l.mediana_dias IS NOT NULL
+    ) AS n_ss_con_mediana,
+    COUNT(*) FILTER (
+        WHERE l.mediana_dias IS NULL
+    ) AS n_ss_sin_mediana,
+    COUNT(*) FILTER (
+        WHERE l.personas_espera IS NOT NULL
+    ) AS n_ss_con_personas,
+    COUNT(*) FILTER (
+        WHERE l.personas_espera IS NULL
+    ) AS n_ss_sin_personas,
+    COUNT(*) FILTER (
+        WHERE l.registros_espera IS NOT NULL
+    ) AS n_ss_con_registros,
+    COUNT(*) FILTER (
+        WHERE l.registros_espera IS NULL
+    ) AS n_ss_sin_registros,
+    COUNT(*) FILTER (
+        WHERE l.reg_24a36m IS NOT NULL
+            AND l.reg_mayor_36m IS NOT NULL
+    ) AS n_ss_con_antiguedad,
+    COUNT(*) FILTER (
+        WHERE l.reg_24a36m IS NULL
+            OR l.reg_mayor_36m IS NULL
+    ) AS n_ss_sin_antiguedad,
+    -- ── Tablas complementarias ────────────────────────────────────
     EXISTS (
         SELECT 1
         FROM personas_nacional_trimestre p
@@ -187,6 +224,7 @@ SELECT l.trimestre,
         WHERE na.trimestre = l.trimestre
             AND na.tipo_prestacion = l.tipo_prestacion
     ) AS nivel_atencion_disponible,
+    -- ── Orden temporal ────────────────────────────────────────────
     SUBSTRING(l.trimestre, 1, 4)::INT * 4 + SUBSTRING(l.trimestre, 7, 1)::INT AS periodo_orden
 FROM listas_espera_ss_trimestre l
 GROUP BY l.trimestre,
