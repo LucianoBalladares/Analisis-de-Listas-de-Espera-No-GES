@@ -2,15 +2,19 @@
 
 ## 1. Descripción general
 
-Este documento describe las variables contenidas en el dataset maestro:
+Este documento describe las variables contenidas en el dataset maestro y sus derivadas.
 
-`listas_espera_ss_trimestre.csv`
+La **tabla base** del proyecto es:
 
-El dataset tiene como unidad de análisis:
+`listas_espera_ss_trimestre`
+
+con unidad de análisis:
 
 > **Servicio de Salud × Trimestre × Tipo de prestación**
 
-Incluye variables de resultado, variables estructurales y variables de control, derivadas de fuentes administrativas oficiales (Glosa 06 – MINSAL).
+Adicionalmente, la vista `v_listas_espera_enriquecido` extiende la tabla base con métricas calculadas (porcentajes de antigüedad, dimensiones temporales) listas para consumo en Power BI.
+
+Todas las variables provienen de fuentes administrativas oficiales (Glosa 06 – MINSAL).
 
 ---
 
@@ -26,6 +30,7 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 - **Notas:**
   - Se utiliza como clave principal para análisis comparativo.
   - Nombre estandarizado según catálogo vigente de 29 Servicios de Salud.
+  - El catálogo canónico y sus alias de normalización están centralizados en `pipeline/config/catalogos.py`.
 
 ---
 
@@ -58,6 +63,7 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 ### 3.1 `mediana_dias`
 
+- **Tabla:** `listas_espera_ss_trimestre`
 - **Definición:** Mediana de días de espera de personas en lista activa.
 - **Tipo:** Numérica continua
 - **Unidad:** Días
@@ -72,6 +78,7 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 ### 3.2 `promedio_dias`
 
+- **Tabla:** `listas_espera_ss_trimestre`
 - **Definición:** Promedio de días de espera.
 - **Tipo:** Numérica continua
 - **Unidad:** Días
@@ -84,6 +91,7 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 ### 3.3 `asimetria`
 
+- **Tabla:** `listas_espera_ss_trimestre`
 - **Definición:** Diferencia entre promedio y mediana de días de espera.
 - **Tipo:** Numérica continua
 - **Cálculo:**
@@ -100,25 +108,35 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 ### 3.4 `pct_mayor_24m`
 
+- **Disponible en:** vista `v_listas_espera_enriquecido` (no en la tabla base)
 - **Definición:** Porcentaje de registros con tiempo de espera superior a 24 meses.
-- **Cálculo en vista:** `(reg_24a36m + reg_mayor_36m) / registros_espera × 100`
+- **Cálculo en vista:**
+
+  `(reg_24a36m + reg_mayor_36m) / registros_espera × 100`
+
 - **Nota importante:** `reg_24a36m` y `reg_mayor_36m` son **tramos mutuamente excluyentes**:
   - `reg_24a36m` → registros con entre 24 y 36 meses de espera
   - `reg_mayor_36m` → registros con más de 36 meses de espera
   - La suma de ambos representa el total de registros con más de 24 meses.
+- **Retorna NULL** si cualquiera de los dos tramos o `registros_espera` es NULL.
 
 ---
 
 ### 3.5 `pct_mayor_36m`
 
+- **Disponible en:** vista `v_listas_espera_enriquecido` (no en la tabla base)
 - **Definición:** Porcentaje de registros con tiempo de espera superior a 36 meses.
 - **Tipo:** Numérica continua
 - **Unidad:** Porcentaje (0–100)
-- **Fuente:** Glosa 06
+- **Cálculo en vista:**
+
+  `reg_mayor_36m / registros_espera × 100`
+
 - **Interpretación:**
   - Indicador de casos extremos (cola larga severa).
 - **Limitaciones:**
   - Disponibilidad variable entre años (ver `limitaciones.md`).
+  - Retorna NULL si `reg_mayor_36m` o `registros_espera` es NULL.
 
 ---
 
@@ -126,16 +144,17 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 ### 4.1 `pct_nivel_terciario`
 
+- **Disponible en:** vista `v_pct_nivel_terciario`
 - **Definición:** Proporción de la demanda registrada en establecimientos de nivel terciario, sobre el total nacional de registros del período.
 - **Tipo:** Numérica continua
 - **Unidad:** Porcentaje (0–100)
 - **Fuente:** Glosa 06 (distribución por nivel de atención), tabla `nivel_atencion_trimestre`
-- **Disponible en:** vista `v_pct_nivel_terciario` (calculada a nivel nacional por trimestre y tipo de prestación)
 - **Interpretación:**
   - Proxy de **fragmentación funcional de la red asistencial**.
   - Valores altos sugieren sobrecarga del nivel de alta complejidad y menor resolución en niveles secundarios.
 - **Limitaciones:**
   - Disponible principalmente a nivel nacional. No hay desagregación por Servicio de Salud en la mayoría de los periodos (ver `limitaciones.md`).
+  - La vista asume que los valores de `nivel_atencion` corresponden exactamente a `'Primario'`, `'Secundario'` o `'Terciario'`. Si el OCR extrae variantes distintas, `validacion.py` lo reportará mediante `check_niveles_atencion`.
 
 ---
 
@@ -143,8 +162,9 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 ### 5.1 `personas_espera`
 
+- **Tabla:** `listas_espera_ss_trimestre`
 - **Definición:** Número de personas únicas en lista de espera activa.
-- **Tipo:** Numérica discreta
+- **Tipo:** Numérica discreta (BIGINT)
 - **Fuente:** Glosa 06
 - **Uso:**
   - Control por tamaño de la demanda.
@@ -155,49 +175,72 @@ Incluye variables de resultado, variables estructurales y variables de control, 
 
 ### 5.2 `registros_espera`
 
+- **Tabla:** `listas_espera_ss_trimestre`
 - **Definición:** Número total de registros en lista de espera.
-- **Tipo:** Numérica discreta
+- **Tipo:** Numérica discreta (BIGINT)
 - **Interpretación:**
-  - Puede diferir de personas por duplicidad de registros.
+  - Puede diferir de `personas_espera` por duplicidad de registros.
 - **Uso:**
-  - Análisis complementario del volumen y denominador para cálculos de antigüedad.
+  - Análisis complementario del volumen y denominador para cálculos de antigüedad en `v_listas_espera_enriquecido`.
+- **Notas:**
+  - Si `registros_espera` es NULL para un período, `pct_mayor_24m` y `pct_mayor_36m` también serán NULL. Verificar disponibilidad en `v_disponibilidad_indicadores` (columna `registros_espera_disponible`).
 
 ---
 
-## 6. Variables adicionales
+## 6. Variables de antigüedad en registros
 
-### 6.1 `fuente`
+### 6.1 `reg_24a36m`
+
+- **Tabla:** `listas_espera_ss_trimestre`
+- **Definición:** Registros con tiempo de espera entre 24 y 36 meses.
+- **Tipo:** Numérica discreta (BIGINT)
+- **Nota:** Tramo mutuamente excluyente con `reg_mayor_36m`.
+
+### 6.2 `reg_mayor_36m`
+
+- **Tabla:** `listas_espera_ss_trimestre`
+- **Definición:** Registros con tiempo de espera superior a 36 meses.
+- **Tipo:** Numérica discreta (BIGINT)
+- **Nota:** Tramo mutuamente excluyente con `reg_24a36m`.
+
+---
+
+## 7. Variables adicionales
+
+### 7.1 `fuente`
 
 - **Definición:** Origen del dato.
 - **Tipo:** Texto
-- **Valores posibles:** "Glosa 06"
+- **Valores posibles:** `"Glosa 06"`
 - **Uso:** Trazabilidad del dato.
 
 ---
 
-### 6.2 `observaciones`
+### 7.2 `observaciones`
 
 - **Definición:** Notas sobre calidad, disponibilidad o particularidades del dato.
 - **Tipo:** Texto
 - **Uso:**
   - Documentación de excepciones.
-  - Registro de alertas generadas automáticamente por el pipeline.
-  - Registro de decisiones metodológicas específicas.
+  - Registro de alertas generadas automáticamente por el pipeline (ej: `ALERTA: suma de tramos de antigüedad supera registros_espera`).
+  - Registro de correcciones de normalización (ej: `ss_id normalizado: SS Arica → SS Arica y Parinacota`).
 
 ---
 
-## 7. Consideraciones generales
+## 8. Consideraciones generales
 
-- Los valores faltantes se codifican como **NA**.
+- Los valores faltantes se codifican como **NULL** en la base de datos y como **NA** en los archivos CSV exportados.
 - No se realizan imputaciones.
 - La disponibilidad de variables varía por periodo y tipo de prestación.
 - El dataset prioriza consistencia longitudinal sobre completitud total.
+- Los campos de conteo (`personas_espera`, `registros_espera`, `reg_24a36m`, `reg_mayor_36m`, `personas_total`, `registros_total_nivel`) son de tipo `BIGINT` en PostgreSQL.
 
 ---
 
-## 8. Relación con documentación adicional
+## 9. Relación con documentación adicional
 
 Para comprender completamente el dataset, se recomienda revisar:
 
 - `docs/metodologia.md` → diseño del estudio y estrategia analítica
 - `docs/limitaciones.md` → disponibilidad de datos por periodo
+- `docs/reglas_limpieza.md` → proceso de construcción del dataset

@@ -14,9 +14,11 @@ El punto de partida es convertir el PDF a texto y tablas legibles por máquina m
 
 ### 1.1 Instrucción de formato numérico
 
-**Regla:** el OCR se configura explícitamente para **no utilizar punto como separador de miles**.
+**Regla:** el OCR se configura explícitamente para **no utilizar punto ni coma como separador de miles**.
 
 **Motivo:** en Chile se usa el punto como separador de miles (ej: `1.234.567`), pero este mismo carácter es el separador decimal en inglés. Si el OCR produce `1.234`, es imposible saber automáticamente si significa `1,234` (mil doscientos treinta y cuatro) o `1.234` (un poco más que uno). Al instruir al OCR para que omita ese separador, el número llega como `1234`, eliminando la ambigüedad.
+
+Esta instrucción también se aplica a la coma: el OCR no la usa como separador de miles. Por eso, en la limpieza automatizada (Fase 3), cualquier coma presente en un valor numérico se interpreta siempre como separador decimal, independientemente de cuántos dígitos haya tras ella.
 
 ### 1.2 Verificación manual de calidad
 
@@ -68,11 +70,13 @@ Al ejecutar `pipeline/ingest/excel_a_sql.py`, el archivo Excel pasa por un proce
 
 **Motivo:** los archivos de Glosa 06 frecuentemente incluyen filas de subtotales al final de cada bloque de datos. Si no se eliminan, se cargarían en la base de datos como si fueran registros de un Servicio de Salud, corrompiendo los totales y los porcentajes calculados en las vistas.
 
-**Aplica a:** las tres hojas del Excel.
+**Aplica a:** las tres hojas del Excel. En la hoja `personas_nacional_trimestre`, el filtro se aplica siempre sobre la columna `tipo_prestacion`, que es la columna identificadora de esa hoja.
 
 ### 3.2 Normalización de nombres de Servicios de Salud (`ss_id`)
 
 **Regla:** los nombres de Servicios de Salud se estandarizan al catálogo vigente de **29 SS**, independientemente de cómo los haya extraído el OCR.
+
+El catálogo canónico y todos sus aliases de normalización están centralizados en `pipeline/config/catalogos.py`. Este archivo es la **única fuente de verdad** del catálogo: cualquier cambio en nombres o incorporación de nuevos servicios se hace exclusivamente ahí, y el resto del pipeline lo importa automáticamente.
 
 Se manejan tres tipos de variantes:
 
@@ -99,18 +103,21 @@ Si un nombre no coincide con ninguna variante conocida, se carga con el valor or
 
 ### 3.4 Conversión de valores numéricos
 
-**Regla:** todos los campos numéricos se convierten a número decimal usando la siguiente lógica:
+**Regla:** todos los campos numéricos se convierten a número decimal con la siguiente lógica, construida sobre la garantía de la Fase 1 (el OCR no usa separadores de miles):
 
-| Formato de entrada | Interpretación                      |
-| ------------------ | ----------------------------------- |
-| `1234`             | 1.234 (entero)                      |
-| `1234,5`           | 1.234,5 (coma como decimal)         |
-| `1234.5`           | 1.234,5 (punto como decimal)        |
-| `1.234,5`          | 1.234,5 (punto miles, coma decimal) |
-| `1,234.5`          | 1.234,5 (coma miles, punto decimal) |
-| `N/D`, `-`, vacío  | `NULL`                              |
+| Formato de entrada | Interpretación                                        |
+| ------------------ | ----------------------------------------------------- |
+| `1234`             | 1.234 (entero)                                        |
+| `1234,5`           | 1.234,5 (coma = decimal, por garantía OCR)            |
+| `0,365`            | 0,365 (coma = decimal, aunque tenga 3 dígitos)        |
+| `1234.5`           | 1.234,5 (punto = decimal)                             |
+| `1.234,5`          | 1.234,5 (ambos presentes → punto=miles, coma=decimal) |
+| `N/D`, `-`, vacío  | `NULL`                                                |
+| Valores negativos  | `NULL` + advertencia en el log                        |
 
-**Nota:** gracias a la instrucción de la Fase 1, el formato `1.234` (punto como miles sin coma decimal) no debería aparecer. Si apareciera, sería interpretado como el decimal `1,234`, lo que generaría un valor fuera de rango detectable en la validación.
+**Nota sobre la coma:** dado que el OCR está instruido para no usar coma como separador de miles, cualquier coma en el output del OCR es siempre un separador decimal. Por eso, `1,200` se convierte a `1.2` y no a `1200`. Esta regla elimina la ambigüedad sin necesidad de heurísticas adicionales.
+
+**Nota sobre negativos:** los valores negativos son aberrantes en este dominio (días de espera, conteos de personas). Si aparecen como resultado de un error de OCR, se descartan como `NULL` con una advertencia en el log, evitando que violen el `CHECK CONSTRAINT` de la base de datos.
 
 ### 3.5 Cálculo de asimetría
 
@@ -163,7 +170,7 @@ Si la suma de `reg_24a36m` + `reg_mayor_36m` supera `registros_espera`, se marca
 PDF / imagen (Glosa 06)
         │
         ▼
-[Fase 1] OCR con instrucción: sin punto separador de miles
+[Fase 1] OCR sin separadores de miles (ni punto ni coma)
          + verificación manual de 3 valores al azar
         │
         ▼
@@ -174,9 +181,11 @@ PDF / imagen (Glosa 06)
         │
         ▼
 [Fase 3] excel_a_sql.py (Python)
-         - Filtrado de filas de totales
-         - Normalización de ss_id y tipo_prestacion
-         - Conversión numérica tolerante a formatos OCR
+         - Filtrado de filas de totales en las 3 hojas
+         - Normalización de ss_id (desde pipeline/config/catalogos.py)
+         - Normalización de tipo_prestacion
+         - Conversión numérica: coma = decimal (garantía OCR)
+         - Negativos descartados como NULL
          - Cálculo de asimetría
          - UPSERT idempotente en PostgreSQL
         │
@@ -198,4 +207,5 @@ Dataset limpio en PostgreSQL
 - **Sin imputación:** los valores no disponibles se codifican como `NULL`. No se estiman ni reemplazan por promedios u otros valores.
 - **Trazabilidad:** cada corrección automática queda registrada en la columna `observaciones` del registro afectado.
 - **Idempotencia:** todos los scripts de limpieza pueden ejecutarse múltiples veces sobre los mismos datos sin producir resultados distintos.
+- **Fuente única de verdad:** el catálogo de Servicios de Salud (nombres canónicos y aliases) está centralizado en `pipeline/config/catalogos.py`. No debe duplicarse en otros archivos.
 - **Transparencia:** las limitaciones de disponibilidad de datos por período se documentan en `docs/limitaciones.md`.

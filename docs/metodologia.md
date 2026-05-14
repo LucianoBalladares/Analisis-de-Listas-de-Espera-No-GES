@@ -6,7 +6,7 @@ Este estudio corresponde a un **análisis observacional, longitudinal y ecológi
 
 La unidad de análisis es el **Servicio de Salud**, evaluado en forma trimestral, lo que permite analizar la evolución temporal de indicadores de listas de espera NO GES.
 
-El enfoque metodológico se centra en la **evaluación de la recuperación del sistema** entre un período de referencia (2023_T3) y un período final (2025_T1), más que en una caracterización estática del nivel de espera.
+El enfoque metodológico se centra en la **evaluación de la recuperación del sistema** entre el primer y último trimestre con mediana disponible, más que en una caracterización estática del nivel de espera.
 
 ---
 
@@ -69,9 +69,10 @@ Se implementó un proceso de transformación en múltiples etapas:
 
 1. **Extracción de información**
    - Aplicación de herramientas de OCR para convertir contenido en texto/tablas.
+   - El OCR se configura explícitamente para no usar separadores de miles, garantizando que cualquier coma en los valores numéricos sea interpretada como separador decimal.
 
 2. **Validación manual**
-   - Revisión de consistencia de valores extraídos.
+   - Verificación de 3 valores al azar por archivo contra el PDF original.
    - Corrección de errores derivados del OCR.
 
 3. **Estructuración intermedia**
@@ -81,10 +82,11 @@ Se implementó un proceso de transformación en múltiples etapas:
 4. **Consolidación**
    - Integración de archivos intermedios en una estructura única.
    - Estandarización de claves (Servicio de Salud, periodo, tipo de prestación).
+   - El catálogo de los 29 Servicios de Salud vigentes y sus aliases de normalización están centralizados en `pipeline/config/catalogos.py`.
 
 5. **Construcción del dataset maestro**
    - Generación de una tabla final con granularidad homogénea.
-   - Manejo explícito de valores faltantes (NA).
+   - Manejo explícito de valores faltantes (NULL).
 
 ---
 
@@ -105,19 +107,21 @@ Se implementó un proceso de transformación en múltiples etapas:
 - Indicador principal de tiempo de espera.
 - Robusto frente a distribuciones asimétricas.
 
-#### Evolución de la mediana (análisis comparativo)
+#### Delta de recuperación (análisis comparativo)
 
-- Definida como la diferencia entre la mediana en el período final y el período de referencia:
+El análisis central del proyecto evalúa la magnitud del cambio en la mediana de espera entre el trimestre más antiguo y el más reciente con datos disponibles para cada Servicio de Salud.
 
-  Δ mediana = mediana(2025_T1) – mediana(2023_T3)
+Este cálculo se implementa en Power BI mediante una medida DAX que utiliza `FIRSTNONBLANK` y `LASTNONBLANK` sobre `mediana_dias`, identificando automáticamente los extremos del período con datos para cada combinación de Servicio de Salud y tipo de prestación.
 
-- Permite evaluar la magnitud de la recuperación entre los dos períodos comparables.
-- Dado que la disponibilidad de medianas varía entre trimestres (ver `docs/limitaciones.md`), el análisis longitudinal se basa en los extremos del período con mayor cobertura de datos, no en una serie trimestral completa.
+Este enfoque es más adecuado que una vista SQL con LAG porque:
+
+- Maneja correctamente los trimestres sin datos (los ignora en lugar de compararlos con el anterior disponible).
+- No requiere definir períodos de referencia fijos, adaptándose a la disponibilidad variable de medianas documentada en `docs/limitaciones.md`.
 
 #### Antigüedad extrema
 
-- `% >24 meses`
-- `% >36 meses`
+- `% >24 meses` — calculada en `v_listas_espera_enriquecido`
+- `% >36 meses` — calculada en `v_listas_espera_enriquecido`
 
 Interpretadas como proxy de riesgo sanitario y presencia de cola larga.
 
@@ -131,6 +135,7 @@ Interpretadas como proxy de riesgo sanitario y presencia de cola larga.
 - Calculada sobre el total nacional de registros por período y tipo de prestación.
 - Utilizada como proxy de **fragmentación funcional de la red asistencial**.
 - Disponible en la vista `v_pct_nivel_terciario`.
+- Requiere que los valores de `nivel_atencion` sean exactamente `'Primario'`, `'Secundario'` o `'Terciario'`. El check `check_niveles_atencion` en `validacion.py` verifica esto tras cada carga.
 
 #### Volumen de demanda
 
@@ -156,14 +161,14 @@ El análisis se estructura en tres niveles:
 ### 6.1 Análisis descriptivo
 
 - Comparación de indicadores entre Servicios de Salud.
-- Evaluación de tendencias entre el período de referencia y el período final.
+- Evaluación de tendencias entre el trimestre de referencia y el trimestre final con datos disponibles.
 - Identificación de heterogeneidad en niveles de espera.
 
 ---
 
 ### 6.2 Análisis de recuperación
 
-- Evaluación del cambio en la mediana entre 2023_T3 y 2025_T1.
+- Evaluación del delta de mediana entre el primer y último trimestre con mediana disponible.
 - Comparación entre Servicios de Salud.
 - Identificación de patrones persistentes de rezago.
 
@@ -186,9 +191,10 @@ El análisis se estructura en tres niveles:
 
 Dada la variabilidad en la disponibilidad de información:
 
-- Los valores no disponibles se codifican como **NA**
+- Los valores no disponibles se codifican como **NULL**
 - No se realizan imputaciones
 - El análisis se restringe a subconjuntos comparables cuando es necesario
+- La vista `v_disponibilidad_indicadores` permite identificar qué indicadores tienen datos en cada período antes de construir cualquier análisis
 
 Las limitaciones específicas por periodo se documentan en:
 
@@ -208,7 +214,7 @@ Las limitaciones específicas por periodo se documentan en:
 ### 8.2 Calidad de datos
 
 - Dependencia de registros administrativos
-- Posibles errores derivados de OCR
+- Posibles errores residuales derivados de OCR
 
 ---
 
@@ -235,6 +241,8 @@ El proyecto busca maximizar reproducibilidad mediante:
 - Disponibilidad de fuentes originales (Glosa 06)
 - Documentación completa del proceso metodológico
 - Definición explícita de variables y supuestos
+- Centralización del catálogo de Servicios de Salud en `pipeline/config/catalogos.py`
+- Scripts de ingesta y transformación idempotentes
 
 ---
 

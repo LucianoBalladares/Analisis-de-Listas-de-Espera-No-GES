@@ -12,7 +12,7 @@ Este proyecto analiza la **heterogeneidad en la recuperación de las listas de e
 
 A diferencia de aproximaciones descriptivas tradicionales centradas en volumen de casos, este trabajo introduce un enfoque analítico basado en:
 
-- Evolución de la mediana de espera entre el periodo inicial (2023_T3) y el periodo final (2025_T1)
+- Evolución de la mediana de espera entre el primer y último trimestre con datos disponibles
 - Estructura de la red asistencial
 - Distribución interna de la demanda
 
@@ -32,8 +32,8 @@ El análisis se estructura en torno a tres dimensiones principales:
 
 ### 1. Recuperación del sistema
 
-- Mediana de días de espera
-- Evolución comparada entre período de referencia (2023_T3) y período final (2025_T1)
+- Mediana de días de espera por Servicio de Salud
+- Delta de recuperación calculado en Power BI mediante una medida DAX que identifica automáticamente el trimestre más antiguo y el más reciente con mediana disponible para cada Servicio de Salud, manejando correctamente los períodos sin datos
 
 ### 2. Severidad de la espera
 
@@ -87,6 +87,8 @@ Modelamiento y visualización en Power BI
 
 Este pipeline prioriza la **trazabilidad y consistencia longitudinal de los datos**, considerando las limitaciones de las fuentes administrativas.
 
+El catálogo de los 29 Servicios de Salud vigentes (nombres canónicos y aliases de normalización) está centralizado en `pipeline/config/catalogos.py`, que actúa como única fuente de verdad para todos los scripts del pipeline.
+
 ---
 
 ## 6. Instrucciones de uso
@@ -94,22 +96,26 @@ Este pipeline prioriza la **trazabilidad y consistencia longitudinal de los dato
 ### 1. Preparar el entorno (una sola vez)
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate   # Linux / macOS
+# .venv\Scripts\activate                             # Windows
 pip install -r requirements.txt
 ```
 
-### 2. Configurar conexión
+### 2. Configurar conexión a la base de datos
 
 ```bash
-cp .env.example .env   # editar con tu contraseña de PostgreSQL
+cp .env.example .env   # completar DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
 ```
 
 ### 3. Inicializar la base de datos (una sola vez)
+
+Ejecutar los archivos SQL en este orden:
 
 ```bash
 psql -U postgres -d listas_espera_ges -f sql/schema/create_tables.sql
 psql -U postgres -d listas_espera_ges -f sql/schema/constraints.sql
 psql -U postgres -d listas_espera_ges -f sql/schema/indexes.sql
+psql -U postgres -d listas_espera_ges -f sql/schema/triggers.sql
 psql -U postgres -d listas_espera_ges -f sql/views/dashboard_views.sql
 ```
 
@@ -124,6 +130,29 @@ python pipeline/ingest/excel_a_sql.py data/staging/cleaned_excels/2024_T4.xlsx
 python pipeline/ingest/validacion.py 2024_T4
 python pipeline/transform/run_transformations.py --trimestre 2024_T4
 ```
+
+> Todos los comandos deben ejecutarse desde la **raíz del repositorio**.
+
+### 5. Conectar Power BI al dashboard local
+
+El dashboard público está disponible sin configuración adicional:
+
+🔗 [Ver dashboard en Power BI Service](https://app.powerbi.com/view?r=eyJrIjoiNDFhZDFlMWYtYzhkMC00NjRjLWIzNzItMGY1MWEyNDUwZmE5IiwidCI6IjZmZDQ4ZjQxLWFmODEtNDVhNS05YzFlLWUzOTkwYmMyN2U3YyIsImMiOjR9)
+
+Para replicar localmente con tu propia base de datos:
+
+1. Abre **Power BI Desktop**
+2. **Inicio → Obtener datos → Base de datos → PostgreSQL**
+3. Completa los campos:
+   - **Servidor:** hostname o IP donde corre PostgreSQL (ej: `localhost`)
+   - **Puerto:** `5432`
+   - **Base de datos:** `listas_espera_ges`
+4. Selecciona las vistas del esquema `public`:
+   - `v_listas_espera_enriquecido` — tabla de hechos principal
+   - `v_dim_trimestre` — dimensión temporal para slicers
+   - `v_pct_nivel_terciario` — concentración en nivel terciario
+   - `v_disponibilidad_indicadores` — mapa de disponibilidad de datos
+5. Usa el modo **Importar** para análisis estáticos o **DirectQuery** para datos en vivo.
 
 ---
 
@@ -143,7 +172,7 @@ python pipeline/transform/run_transformations.py --trimestre 2024_T4
 - `mediana_dias` → Mediana de días de espera
 - `personas_espera` → Número de personas en lista activa
 - `registros_espera` → Número de registros totales
-- `pct_mayor_24m` / `pct_mayor_36m` → Antigüedad extrema
+- `pct_mayor_24m` / `pct_mayor_36m` → Antigüedad extrema (calculadas en `v_listas_espera_enriquecido`)
 - `pct_nivel_terciario` → Concentración en nivel terciario (disponible en `v_pct_nivel_terciario`)
 - `asimetria` → Diferencia entre promedio y mediana
 
@@ -157,7 +186,7 @@ python pipeline/transform/run_transformations.py --trimestre 2024_T4
 El dashboard permite:
 
 - Comparar Servicios de Salud
-- Analizar la evolución de la mediana entre 2023_T3 y 2025_T1
+- Analizar la evolución de la mediana entre el primer y último trimestre con datos disponibles
 - Identificar concentración de demanda en nivel terciario
 - Detectar presencia de colas largas (casos extremos)
 
@@ -200,7 +229,7 @@ El detalle completo por trimestre se encuentra en `docs/limitaciones.md`.
 Este proyecto aporta:
 
 - Un dataset estructurado listo para análisis longitudinal
-- Un enfoque analítico centrado en la evolución del sistema entre periodos comparables
+- Un enfoque analítico centrado en la evolución del sistema entre períodos comparables
 - Evidencia sobre desigualdad estructural entre Servicios de Salud
 - Una herramienta visual para apoyo en toma de decisiones
 
