@@ -6,12 +6,14 @@ Uso:
     python pipeline/transform/run_transformations.py --trimestre 2024_T3
 
 Orden de ejecución:
-    0. catalog_normalization   → normalización exacta desde SS_ID_MAP (catalogos.py)
-    1. normalize_services.sql  → normalización parcial ILIKE (fallback)
-    2. clean_waitlists.sql     → corrige métricas y marca alertas
+    0.  catalog_normalization        → normalización exacta desde SS_ID_MAP (catalogos.py)
+    0b. _ss_canonicos (temp table)   → tabla temporal con SS_CANONICOS para normalize_services.sql
+    1.  normalize_services.sql       → normalización parcial ILIKE (fallback)
+    2.  clean_waitlists.sql          → corrige métricas y marca alertas
 
-Cada paso se ejecuta en su propia transacción. Si el paso 0 falla,
+Cada paso se ejecuta en su propia transacción. Si un paso crítico falla,
 los siguientes no se ejecutan y se registra el error en pipeline_runs.
+
 """
 
 import os
@@ -21,18 +23,16 @@ import logging
 from pathlib import Path
 from argparse import ArgumentParser
 
-# ── Ruta raíz derivada de la ubicación del script (no del CWD) ───────────────
 _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import psycopg2
 import psycopg2.extras
+from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 
 from pipeline.config.catalogos import SS_CANONICOS, SS_ID_MAP
-
-# ── Configuración ──────────────────────────────────────────────────────────────
 
 load_dotenv()
 
@@ -64,6 +64,7 @@ TRANSFORMATIONS = [
     SQL_DIR / "clean_waitlists.sql",
 ]
 
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def parse_args():
@@ -94,68 +95,44 @@ def split_statements(sql: str) -> list[str]:
     while i < n:
         ch = sql[i]
 
-        # ── Comentario de bloque /* ... */ ────────────────────────────────────
         if ch == '/' and i + 1 < n and sql[i + 1] == '*':
-            buf.append(ch)
-            buf.append(sql[i + 1])
-            i += 2
+            buf.append(ch); buf.append(sql[i + 1]); i += 2
             while i < n:
                 if sql[i] == '*' and i + 1 < n and sql[i + 1] == '/':
-                    buf.append(sql[i])
-                    buf.append(sql[i + 1])
-                    i += 2
-                    break
-                buf.append(sql[i])
-                i += 1
+                    buf.append(sql[i]); buf.append(sql[i + 1]); i += 2; break
+                buf.append(sql[i]); i += 1
             continue
 
-        # ── Comentario de línea -- ────────────────────────────────────────────
         if ch == '-' and i + 1 < n and sql[i + 1] == '-':
             while i < n and sql[i] != '\n':
-                buf.append(sql[i])
-                i += 1
+                buf.append(sql[i]); i += 1
             continue
 
-        # ── Dollar-quoting $tag$...$tag$ ──────────────────────────────────────
         if ch == '$':
             j = i + 1
             while j < n and (sql[j].isalnum() or sql[j] == '_'):
                 j += 1
             if j < n and sql[j] == '$':
-                tag = sql[i:j + 1]      # ej: '$$' o '$body$'
-                buf.append(tag)
-                i = j + 1
-                while i < n:            # buscar cierre del mismo tag
+                tag = sql[i:j + 1]
+                buf.append(tag); i = j + 1
+                while i < n:
                     if sql[i:i + len(tag)] == tag:
-                        buf.append(tag)
-                        i += len(tag)
-                        break
-                    buf.append(sql[i])
-                    i += 1
+                        buf.append(tag); i += len(tag); break
+                    buf.append(sql[i]); i += 1
                 continue
-            # No era dollar-quoting: tratar '$' como carácter normal
-            buf.append(ch)
-            i += 1
-            continue
+            buf.append(ch); i += 1; continue
 
-        # ── Literal de texto ' o " ────────────────────────────────────────────
         if ch in ("'", '"'):
-            q = ch
-            buf.append(ch)
-            i += 1
+            q = ch; buf.append(ch); i += 1
             while i < n:
-                c2 = sql[i]
-                buf.append(c2)
-                i += 1
+                c2 = sql[i]; buf.append(c2); i += 1
                 if c2 == q:
-                    if i < n and sql[i] == q:   # comilla duplicada = escape
-                        buf.append(sql[i])
-                        i += 1
+                    if i < n and sql[i] == q:
+                        buf.append(sql[i]); i += 1
                     else:
                         break
             continue
 
-        # ── Separador de sentencia ────────────────────────────────────────────
         if ch == ';':
             stmt = ''.join(buf).strip()
             meaningful = '\n'.join(
@@ -164,14 +141,10 @@ def split_statements(sql: str) -> list[str]:
             ).strip()
             if meaningful:
                 statements.append(stmt)
-            buf = []
-            i += 1
-            continue
+            buf = []; i += 1; continue
 
-        buf.append(ch)
-        i += 1
+        buf.append(ch); i += 1
 
-    # Última sentencia sin ';' final
     stmt = ''.join(buf).strip()
     meaningful = '\n'.join(
         ln for ln in stmt.splitlines()
@@ -185,8 +158,8 @@ def split_statements(sql: str) -> list[str]:
 
 def execute_sql_file(conn, filepath: Path) -> dict:
     """
-    Ejecuta todas las sentencias DML de un archivo SQL dentro de una
-    transacción. Retorna estadísticas de ejecución.
+    Ejecuta todas las sentencias de un archivo SQL dentro de una transacción.
+
     """
     if not filepath.exists():
         raise FileNotFoundError(f"Archivo SQL no encontrado: {filepath}")
@@ -202,9 +175,25 @@ def execute_sql_file(conn, filepath: Path) -> dict:
         for stmt in statements:
             try:
                 cur.execute(stmt)
-                if cur.rowcount and cur.rowcount > 0:
+
+                if cur.description is not None:
+                    # Sentencia SELECT: capturar y loguear resultados.
+                    # cur.description != None identifica SELECTs en psycopg2.
+                    rows = cur.fetchall()
+                    if rows:
+                        col_names = [d[0] for d in cur.description]
+                        log.info(f"    ── Reporte SQL [{filepath.name}]:")
+                        for row in rows:
+                            log.info(
+                                "    " + "  ".join(
+                                    f"{col}={val}" for col, val in zip(col_names, row)
+                                )
+                            )
+                elif cur.rowcount is not None and cur.rowcount > 0:
                     total_affected += cur.rowcount
+
                 executed += 1
+
             except psycopg2.Error as e:
                 raise RuntimeError(
                     f"Error en sentencia #{executed + 1} de {filepath.name}:\n"
@@ -219,7 +208,43 @@ def execute_sql_file(conn, filepath: Path) -> dict:
     }
 
 
-# ── Normalización desde catálogo (única fuente de verdad) ─────────────────
+# ── Paso 0b: Tabla temporal _ss_canonicos (FIX C1) ────────────────────────────
+
+def create_canonical_temp_table(conn) -> dict:
+    """
+    Crea la tabla temporal de sesión _ss_canonicos con los nombres canónicos
+    de SS_CANONICOS en catalogos.py.
+
+    Sobre la persistencia de la tabla temporal:
+        PostgreSQL mantiene las tablas temporales durante toda la sesión, no
+        solo durante la transacción activa. Esto significa que la tabla persiste
+        tras el COMMIT de este paso y está disponible cuando normalize_services.sql
+        se ejecuta en su propia transacción a continuación.
+        Si la sesión se cierra y se abre una nueva, la tabla se recrea en el
+        siguiente run del pipeline. CREATE TEMP TABLE IF NOT EXISTS garantiza
+        que una segunda ejecución dentro de la misma sesión no falle.
+    """
+    with conn.cursor() as cur:
+        cur.execute("""
+            CREATE TEMP TABLE IF NOT EXISTS _ss_canonicos (
+                ss_id TEXT PRIMARY KEY
+            )
+        """)
+        cur.execute("TRUNCATE _ss_canonicos")
+        execute_values(
+            cur,
+            "INSERT INTO _ss_canonicos (ss_id) VALUES %s",
+            [(ss,) for ss in SS_CANONICOS],
+        )
+
+    return {
+        "archivo":         "create_canonical_temp_table (SS_CANONICOS de catalogos.py)",
+        "sentencias":      3,
+        "filas_afectadas": len(SS_CANONICOS),
+    }
+
+
+# ── Paso 0: Normalización exacta desde catálogo ────────────────────────────────
 
 def execute_catalog_normalization(conn) -> dict:
     """
@@ -230,12 +255,6 @@ def execute_catalog_normalization(conn) -> dict:
     Para cada (raw_key → canonical) de SS_ID_MAP, reconstruye las
     variantes con prefijo que podrían haber llegado a la BD si Python
     no las normalizó, y ejecuta un UPDATE case-insensitive.
-
-    Mirrors la lógica de normalize_ss_id() en excel_a_sql.py:
-      1. raw_key tal cual        (ej: "antofagasta")
-      2. con prefijo "ss "       (ej: "ss antofagasta")
-      3. con prefijo "s.s. "     (variante con puntos)
-      4. con prefijo largo OCR   (ej: "servicio de salud antofagasta")
     """
 
     def build_variants(raw_key: str) -> list[str]:
@@ -346,14 +365,17 @@ def print_post_transform_report(conn, trimestre):
 
 def _run_step(label: str, fn, conn, trimestre) -> bool:
     """
-    Ejecuta un paso (función o archivo SQL), hace commit en éxito y
+    Ejecuta un paso (función Python), hace commit en éxito y
     registra en pipeline_runs. Devuelve True si tuvo éxito.
     """
     log.info(f"\n── {label}")
     try:
         result = fn(conn)
         conn.commit()
-        log.info(f"  ✓ {result['sentencias']} sentencias | {result['filas_afectadas']} filas afectadas")
+        log.info(
+            f"  ✓ {result['sentencias']} sentencias | "
+            f"{result['filas_afectadas']} filas afectadas"
+        )
         try:
             log_pipeline_run(conn, result["archivo"], trimestre, "ok",
                              filas=result["filas_afectadas"])
@@ -367,8 +389,7 @@ def _run_step(label: str, fn, conn, trimestre) -> bool:
         conn.rollback()
         log.error(f"  ✗ {e}")
         try:
-            archivo = label if isinstance(label, str) else str(label)
-            log_pipeline_run(conn, archivo, trimestre, "error", detalle=str(e)[:500])
+            log_pipeline_run(conn, str(label), trimestre, "error", detalle=str(e)[:500])
             conn.commit()
         except Exception:
             conn.rollback()
@@ -395,7 +416,7 @@ def main():
     try:
         # ── Paso 0: Normalización exacta desde SS_ID_MAP (catalogos.py) ───────
         ok = _run_step(
-            "catalog_normalization (SS_ID_MAP de catalogos.py)",
+            "0 — catalog_normalization (SS_ID_MAP de catalogos.py)",
             execute_catalog_normalization,
             conn, trimestre,
         )
@@ -403,7 +424,20 @@ def main():
             log.error("  Deteniendo pipeline: la normalización de catálogo es prerequisito.")
             has_errors = True
 
-        # ── Pasos SQL (solo si paso 0 fue exitoso) ────────────────────────────
+        # ── Paso 0b: Tabla temporal _ss_canonicos ─────────────────────────────
+        if not has_errors:
+            ok = _run_step(
+                "0b — temp table _ss_canonicos (SS_CANONICOS de catalogos.py)",
+                create_canonical_temp_table,
+                conn, trimestre,
+            )
+            if not ok:
+                log.error(
+                    "  Deteniendo: _ss_canonicos es prerequisito de normalize_services.sql."
+                )
+                has_errors = True
+
+        # ── Pasos SQL (solo si pasos 0 y 0b fueron exitosos) ─────────────────
         if not has_errors:
             for sql_file in TRANSFORMATIONS:
                 ok = _run_step(
@@ -414,7 +448,10 @@ def main():
                 if not ok:
                     has_errors = True
                     if "normalize_services" in sql_file.name:
-                        log.error("  Deteniendo: normalize_services.sql es prerequisito de clean_waitlists.sql.")
+                        log.error(
+                            "  Deteniendo: normalize_services.sql es prerequisito "
+                            "de clean_waitlists.sql."
+                        )
                         break
 
         # ── Reporte final ─────────────────────────────────────────────────────
