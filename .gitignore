@@ -35,6 +35,8 @@ data/staging/
 data/processed/*.xlsx
 data/processed/*.csv
 data/processed/export_tables/
+!data/processed/.gitkeep
+!data/processed/export_tables/.gitkeep
 
 # Excepción: la muestra anonimizada sí se versiona
 !data/sample/
