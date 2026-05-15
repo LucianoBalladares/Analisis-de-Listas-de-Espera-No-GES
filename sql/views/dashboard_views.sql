@@ -12,13 +12,6 @@
 --   v_nivel_atencion_distribucion  → % de demanda por nivel de atención
 --   v_pct_nivel_terciario          → proporción de demanda en nivel terciario por período
 --   v_disponibilidad_indicadores   → mapa de disponibilidad de datos por período
---
--- NOTA — Delta de recuperación (análisis central del proyecto):
---   El cálculo del delta entre el trimestre más antiguo y más reciente con
---   mediana disponible NO se implementa como vista SQL. Se hace en Power BI
---   mediante una medida DAX que busca el FIRSTNONBLANK y LASTNONBLANK de
---   mediana_dias, lo que maneja correctamente los trimestres sin datos
---   (los ignora) sin necesidad de lógica de ventana compleja en SQL.
 -- =================================================================
 -- -----------------------------------------------------------------
 -- 1. Dimensión temporal
@@ -52,7 +45,7 @@ ORDER BY trimestre;
 --
 -- pct_mayor_24m: devuelve NULL si cualquiera de los dos tramos es NULL.
 -- reg_24a36m y reg_mayor_36m son tramos mutuamente excluyentes:
---   reg_24a36m  → registros con entre 24 y 36 meses de espera
+--   reg_24a36m    → registros con entre 24 y 36 meses de espera
 --   reg_mayor_36m → registros con más de 36 meses de espera
 --   Su suma representa el total de registros con más de 24 meses.
 -- -----------------------------------------------------------------
@@ -158,12 +151,10 @@ GROUP BY trimestre,
 -- Muestra qué indicadores tienen datos en cada período.
 -- Útil para marcar visualmente datos faltantes en Power BI.
 --
--- CAMBIO respecto a la versión anterior:
+-- CAMBIO respecto a la versión anterior de esta vista:
 --   Se añaden columnas n_ss_con_* / n_ss_sin_* para exponer la
 --   disponibilidad a nivel de Servicio de Salud, no solo como
---   booleano agregado de período. Esto permite en Power BI detectar
---   períodos donde la mayoría de SS tiene el dato pero alguno no,
---   en lugar de ver solo TRUE/FALSE para todo el período.
+--   booleano agregado de período.
 -- -----------------------------------------------------------------
 CREATE OR REPLACE VIEW v_disponibilidad_indicadores AS
 SELECT l.trimestre,
@@ -183,7 +174,6 @@ SELECT l.trimestre,
         AND l.reg_mayor_36m IS NOT NULL
     ) AS antiguedad_completa_disponible,
     -- ── Conteos de SS con/sin dato (granularidad para filtros) ────
-    -- Permite detectar períodos donde algunos SS tienen el dato y otros no.
     COUNT(*) FILTER (
         WHERE l.mediana_dias IS NOT NULL
     ) AS n_ss_con_mediana,
@@ -216,13 +206,14 @@ SELECT l.trimestre,
         FROM personas_nacional_trimestre p
         WHERE p.trimestre = l.trimestre
             AND p.tipo_prestacion = l.tipo_prestacion
-            AND p.personas_total IS NOT NULL
+            AND p.personas_total IS NOT NULL -- valor efectivamente disponible
     ) AS personas_nacional_disponible,
     EXISTS (
         SELECT 1
         FROM nivel_atencion_trimestre na
         WHERE na.trimestre = l.trimestre
             AND na.tipo_prestacion = l.tipo_prestacion
+            AND na.registros_total_nivel IS NOT NULL -- FIX M1: valor efectivamente disponible
     ) AS nivel_atencion_disponible,
     -- ── Orden temporal ────────────────────────────────────────────
     SUBSTRING(l.trimestre, 1, 4)::INT * 4 + SUBSTRING(l.trimestre, 7, 1)::INT AS periodo_orden
