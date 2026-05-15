@@ -10,7 +10,7 @@
 --   en este archivo) fue migrada a execute_catalog_normalization() en
 --   run_transformations.py. Esa función lee SS_ID_MAP directamente de
 --   catalogos.py, garantizando una única fuente de verdad.
---   Este archivo solo ejecuta el paso 2 (ILIKE) como fallback para
+--   Este archivo solo ejecuta el paso ILIKE como fallback para
 --   variantes que no figuren en SS_ID_MAP.
 --
 -- Idempotente: filas ya normalizadas no cumplen el WHERE de exclusión.
@@ -41,35 +41,8 @@ SET ss_id = CASE
         ELSE ss_id
     END,
     observaciones = COALESCE(observaciones || ' | ', '') || 'ss_id normalizado por coincidencia parcial ILIKE (fallback)',
-    updated_at = NOW()
+    updated_at = NOW() 
 WHERE ss_id NOT IN (
-        'SS Arica y Parinacota',
-        'SS Tarapacá',
-        'SS Antofagasta',
-        'SS Atacama',
-        'SS Coquimbo',
-        'SS Viña del Mar - Quillota',
-        'SS Valparaíso - San Antonio',
-        'SS Aconcagua',
-        'SS Metropolitano Norte',
-        'SS Metropolitano Occidente',
-        'SS Metropolitano Central',
-        'SS Metropolitano Oriente',
-        'SS Metropolitano Sur',
-        'SS Metropolitano Sur Oriente',
-        'SS O''Higgins',
-        'SS Maule',
-        'SS Ñuble',
-        'SS Concepción',
-        'SS Arauco',
-        'SS Talcahuano',
-        'SS Biobío',
-        'SS Araucanía Norte',
-        'SS Araucanía Sur',
-        'SS Los Ríos',
-        'SS Osorno',
-        'SS Del Reloncaví',
-        'SS Chiloé',
-        'SS Aysén',
-        'SS Magallanes'
+        SELECT ss_id
+        FROM _ss_canonicos
     );
