@@ -26,7 +26,6 @@ import sys
 import logging
 from pathlib import Path
 
-# ── Ruta raíz derivada de la ubicación del script (no del CWD) ───────────────
 _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -64,13 +63,11 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD", ""),
 }
 
-# Valores que representan datos no disponibles en los Excel (post-OCR)
 NULL_VALUES = {
     "N/D", "ND", "NO DISPONIBLE", "S/I", "S/D", "SIN INFORMACION",
     "SIN INFORMACIÓN", "-", "—", "–", "", "NA", "N/A", ".", "..",
 }
 
-# Patrones de filas de totales o encabezados repetidos que deben ignorarse.
 TOTAL_ROW_PATTERNS = re.compile(
     r'^\s*(total|subtotal|país|pais|nacional|promedio\s+nacional|promedio\s+país'
     r'|n\.?\s*a\.?|n/a)\s*$',
@@ -130,8 +127,6 @@ TIPO_PRESTACION_MAP = {
     "quirúrgica":                       "IQ",
 }
 
-# SS_ID_MAP importado desde pipeline.config.catalogos
-
 # ── Funciones auxiliares ───────────────────────────────────────────────────────
 
 def parse_trimestre(filepath: Path) -> str:
@@ -181,15 +176,12 @@ def clean_numeric(val) -> float | None:
         return None
 
     if ',' in s and '.' in s:
-        # Ambos separadores → punto=miles, coma=decimal
         s = s.replace('.', '').replace(',', '.')
     elif ',' in s:
         parts = s.split(',')
         if len(parts) == 2:
-            # OCR garantiza que la coma es separador decimal (nunca de miles).
             s = s.replace(',', '.')
         else:
-            # Múltiples comas: dato corrupto, descartar
             s = s.replace(',', '')
 
     s = re.sub(r'[^\d.\-]', '', s)
@@ -225,10 +217,6 @@ def normalize_tipo_prestacion(val) -> str | None:
 
 
 def normalize_ss_id(val) -> str | None:
-    """
-    Normaliza el nombre del Servicio de Salud al estándar vigente (29 SS).
-    SS_ID_MAP importado desde pipeline.config.catalogos.
-    """
     if pd.isna(val):
         return None
     raw = str(val).strip()
@@ -367,7 +355,7 @@ def process_nivel_atencion(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-# ── UPSERT en PostgreSQL ───────────────────────────────────────────────────────
+# ── Helpers de UPSERT ─────────────────────────────────────────────────────────
 
 def _to_row(series, cols: list) -> tuple:
     return tuple(
@@ -376,7 +364,50 @@ def _to_row(series, cols: list) -> tuple:
     )
 
 
-def upsert_listas_espera(conn, df: pd.DataFrame) -> int:
+def _count_existing(conn, tabla: str, trimestre: str) -> int:
+    """
+    Cuenta las filas que ya existen en la tabla para el trimestre dado.
+    Usado antes del UPSERT para estimar cuántas serán inserciones nuevas
+    vs actualizaciones de registros existentes (FIX M4).
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT COUNT(*) FROM {tabla} WHERE trimestre = %s",
+            (trimestre,),
+        )
+        return cur.fetchone()[0]
+
+
+def _compute_insert_update(n_upserted: int, pre_count: int) -> tuple[int, int]:
+    """
+    Estima inserciones vs actualizaciones a partir del UPSERT.
+
+    Lógica:
+        - n_updated = min(pre_count, n_upserted)
+          (no puede haber más actualizaciones que filas preexistentes)
+        - n_inserted = n_upserted - n_updated
+
+    Esta estimación es exacta en el flujo habitual (primera carga de un
+    trimestre: pre_count=0 → todo son inserts; re-carga del mismo Excel:
+    pre_count≈n_upserted → todo son updates). En re-cargas parciales la
+    estimación puede diferir ligeramente del valor real.
+    """
+    n_updated  = min(pre_count, n_upserted)
+    n_inserted = n_upserted - n_updated
+    return n_inserted, n_updated
+
+
+# ── UPSERT en PostgreSQL ───────────────────────────────────────────────────────
+
+def upsert_listas_espera(conn, df: pd.DataFrame) -> tuple[int, int]:
+    """Inserta o actualiza filas en listas_espera_ss_trimestre.
+
+    Returns:
+        (n_inserted, n_updated): estimación de inserciones y actualizaciones.
+    """
+    trimestre = df["trimestre"].iloc[0] if not df.empty else ""
+    pre_count = _count_existing(conn, "listas_espera_ss_trimestre", trimestre)
+
     cols = [
         "ss_id", "trimestre", "tipo_prestacion", "personas_espera",
         "registros_espera", "mediana_dias", "promedio_dias", "asimetria",
@@ -403,10 +434,19 @@ def upsert_listas_espera(conn, df: pd.DataFrame) -> int:
     """
     with conn.cursor() as cur:
         execute_values(cur, sql, rows)
-    return len(rows)
+
+    return _compute_insert_update(len(rows), pre_count)
 
 
-def upsert_personas_nacional(conn, df: pd.DataFrame) -> int:
+def upsert_personas_nacional(conn, df: pd.DataFrame) -> tuple[int, int]:
+    """Inserta o actualiza filas en personas_nacional_trimestre.
+
+    Returns:
+        (n_inserted, n_updated): estimación de inserciones y actualizaciones.
+    """
+    trimestre = df["trimestre"].iloc[0] if not df.empty else ""
+    pre_count = _count_existing(conn, "personas_nacional_trimestre", trimestre)
+
     cols = ["trimestre", "tipo_prestacion", "personas_total"]
     rows = [_to_row(r, cols) for _, r in df.iterrows()]
     sql = """
@@ -418,10 +458,19 @@ def upsert_personas_nacional(conn, df: pd.DataFrame) -> int:
     """
     with conn.cursor() as cur:
         execute_values(cur, sql, rows)
-    return len(rows)
+
+    return _compute_insert_update(len(rows), pre_count)
 
 
-def upsert_nivel_atencion(conn, df: pd.DataFrame) -> int:
+def upsert_nivel_atencion(conn, df: pd.DataFrame) -> tuple[int, int]:
+    """Inserta o actualiza filas en nivel_atencion_trimestre.
+
+    Returns:
+        (n_inserted, n_updated): estimación de inserciones y actualizaciones.
+    """
+    trimestre = df["trimestre"].iloc[0] if not df.empty else ""
+    pre_count = _count_existing(conn, "nivel_atencion_trimestre", trimestre)
+
     cols = ["nivel_atencion", "trimestre", "tipo_prestacion", "registros_total_nivel"]
     rows = [_to_row(r, cols) for _, r in df.iterrows()]
     sql = """
@@ -434,19 +483,39 @@ def upsert_nivel_atencion(conn, df: pd.DataFrame) -> int:
     """
     with conn.cursor() as cur:
         execute_values(cur, sql, rows)
-    return len(rows)
+
+    return _compute_insert_update(len(rows), pre_count)
 
 
-def log_pipeline_run(conn, archivo: str, trimestre: str, tabla: str,
-                     procesadas: int, cargadas: int, omitidas: int,
-                     estado: str, detalle: str = None):
+# ── Registro de ejecución ─────────────────────────────────────────────────────
+
+def log_pipeline_run(
+    conn,
+    archivo:     str,
+    trimestre:   str,
+    tabla:       str,
+    procesadas:  int,
+    insertadas:  int,
+    actualizadas: int,
+    omitidas:    int,
+    estado:      str,
+    detalle:     str = None,
+):
+    """
+    Registra una ejecución en pipeline_runs.
+
+    """
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO pipeline_runs
                 (archivo, trimestre, tabla_destino, filas_procesadas,
                  filas_insertadas, filas_actualizadas, filas_omitidas, estado, detalle)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (archivo, trimestre, tabla, procesadas, cargadas, 0, omitidas, estado, detalle))
+        """, (
+            archivo, trimestre, tabla,
+            procesadas, insertadas, actualizadas, omitidas,
+            estado, detalle,
+        ))
 
 
 # ── Orquestador ────────────────────────────────────────────────────────────────
@@ -484,8 +553,10 @@ def main(filepath: str):
 
             if df_raw is None:
                 try:
-                    log_pipeline_run(conn, path.name, trimestre, sheet_name,
-                                     0, 0, 0, "warning", "Hoja no encontrada o vacía")
+                    log_pipeline_run(
+                        conn, path.name, trimestre, sheet_name,
+                        0, 0, 0, 0, "warning", "Hoja no encontrada o vacía",
+                    )
                     conn.commit()
                 except Exception:
                     conn.rollback()
@@ -494,35 +565,45 @@ def main(filepath: str):
 
             n_raw = len(df_raw)
             try:
-                df_clean = process_fn(df_raw, trimestre)
-                omitidas = n_raw - len(df_clean)
-                cargadas = upsert_fn(conn, df_clean)
+                df_clean  = process_fn(df_raw, trimestre)
+                omitidas  = n_raw - len(df_clean)
+
+                n_inserted, n_updated = upsert_fn(conn, df_clean)
+                cargadas = n_inserted + n_updated
 
                 estado = "warning" if omitidas > 0 else "ok"
-                log_pipeline_run(conn, path.name, trimestre, sheet_name,
-                                 n_raw, cargadas, omitidas, estado)
-                conn.commit()   # ← commit por hoja
-                log.info(f"  ✓ {cargadas} filas cargadas | {omitidas} omitidas\n")
+                log_pipeline_run(
+                    conn, path.name, trimestre, sheet_name,
+                    n_raw, n_inserted, n_updated, omitidas, estado,
+                )
+                conn.commit()
+                log.info(
+                    f"  ✓ {n_inserted} insertadas | "
+                    f"{n_updated} actualizadas | "
+                    f"{omitidas} omitidas\n"
+                )
 
             except ValueError as e:
-                # Error de estructura (columnas faltantes, formato incorrecto)
                 conn.rollback()
                 log.error(f"  ✗ Error de estructura: {e}\n")
                 try:
-                    log_pipeline_run(conn, path.name, trimestre, sheet_name,
-                                     n_raw, 0, n_raw, "error", str(e)[:500])
+                    log_pipeline_run(
+                        conn, path.name, trimestre, sheet_name,
+                        n_raw, 0, 0, n_raw, "error", str(e)[:500],
+                    )
                     conn.commit()
                 except Exception as log_err:
                     log.warning(f"  No se pudo registrar error en pipeline_runs: {log_err}")
                     conn.rollback()
 
             except psycopg2.Error as e:
-                # Error de base de datos (constraint, timeout, etc.)
                 conn.rollback()
                 log.error(f"  ✗ Error de base de datos en '{sheet_name}': {e}\n")
                 try:
-                    log_pipeline_run(conn, path.name, trimestre, sheet_name,
-                                     n_raw, 0, n_raw, "error", str(e)[:500])
+                    log_pipeline_run(
+                        conn, path.name, trimestre, sheet_name,
+                        n_raw, 0, 0, n_raw, "error", str(e)[:500],
+                    )
                     conn.commit()
                 except Exception as log_err:
                     log.warning(f"  No se pudo registrar error en pipeline_runs: {log_err}")
