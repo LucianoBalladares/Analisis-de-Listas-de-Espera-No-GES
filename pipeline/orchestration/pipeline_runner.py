@@ -60,6 +60,9 @@ INGEST_SCRIPT     = _ROOT / "pipeline" / "ingest"         / "excel_a_sql.py"
 VALIDATE_SCRIPT   = _ROOT / "pipeline" / "ingest"         / "validacion.py"
 TRANSFORM_SCRIPT  = _ROOT / "pipeline" / "transform"      / "run_transformations.py"
 
+STEP_TIMEOUT_SECONDS = 3600  # 1 hora
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def parse_args():
@@ -97,13 +100,21 @@ def extract_trimestre(filepath: Path) -> str:
 def run_step(label: str, cmd: list) -> int:
     """
     Ejecuta un subproceso y retorna su exit code.
-    Muestra la salida en tiempo real usando el mismo stdout/stderr del proceso padre.
+    Muestra la salida en tiempo real usando el mismo stdout/stderr del proceso padre
     """
     log.info(f"  Ejecutando: {' '.join(str(c) for c in cmd)}")
-    result = subprocess.run(
-        [sys.executable] + [str(c) for c in cmd],
-    )
-    return result.returncode
+    try:
+        result = subprocess.run(
+            [sys.executable] + [str(c) for c in cmd],
+            timeout=STEP_TIMEOUT_SECONDS,
+        )
+        return result.returncode
+    except subprocess.TimeoutExpired:
+        log.error(
+            f"  ✗ Timeout: el paso '{label}' superó {STEP_TIMEOUT_SECONDS}s y fue cancelado. "
+            "Verificar conexión a la BD o integridad del archivo de entrada."
+        )
+        return 1
 
 
 def separator(title: str = ""):
