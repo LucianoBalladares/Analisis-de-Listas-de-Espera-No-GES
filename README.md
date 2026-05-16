@@ -145,6 +145,21 @@ python pipeline/ingest/validacion.py 2024_T4
 python pipeline/transform/run_transformations.py --trimestre 2024_T4
 ```
 
+> **Incoherencias en tramos de antigüedad provenientes de la fuente (Glosa 06):**
+>
+> La Glosa 06 puede contener registros donde la suma de `reg_24a36m` + `reg_mayor_36m`
+> supera a `registros_espera`. Cuando esto ocurre, la validación lo reporta como error
+> crítico y el pipeline se detiene. Si verificaste que la incoherencia proviene de la
+> fuente original (no de un error de OCR ni de estructuración), usa `--force` para
+> continuar. Las transformaciones marcarán esas filas con una alerta en `observaciones`.
+>
+> ```bash
+> python pipeline/orchestration/pipeline_runner.py 2024_T4.xlsx --force
+> ```
+>
+> Revisa siempre `pipeline/logs/validacion.log` para identificar exactamente qué
+> registros presentan la incoherencia antes de decidir si usar `--force`.
+
 > Todos los comandos deben ejecutarse desde la **raíz del repositorio**.
 
 ### 5. Conectar Power BI al dashboard local

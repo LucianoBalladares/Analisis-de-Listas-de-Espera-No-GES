@@ -14,11 +14,9 @@ El punto de partida es convertir el PDF a texto y tablas legibles por máquina m
 
 ### 1.1 Instrucción de formato numérico
 
-**Regla:** el OCR se configura explícitamente para **no utilizar punto ni coma como separador de miles**.
+**Regla:** el OCR se configura explícitamente para **no producir ningún separador de miles** (ni punto ni coma). Los números deben llegar como enteros limpios (`1234`) o con punto decimal (`1234.5`).
 
-**Motivo:** en Chile se usa el punto como separador de miles (ej: `1.234.567`), pero este mismo carácter es el separador decimal en inglés. Si el OCR produce `1.234`, es imposible saber automáticamente si significa `1,234` (mil doscientos treinta y cuatro) o `1.234` (un poco más que uno). Al instruir al OCR para que omita ese separador, el número llega como `1234`, eliminando la ambigüedad.
-
-Esta instrucción también se aplica a la coma: el OCR no la usa como separador de miles. Por eso, en la limpieza automatizada (Fase 3), cualquier coma presente en un valor numérico se interpreta siempre como separador decimal, independientemente de cuántos dígitos haya tras ella.
+**Motivo:** en Chile se usa el punto como separador de miles (ej: `1.234.567`), pero este mismo carácter es el separador decimal en inglés. Al instruir al OCR para que omita cualquier separador de miles, el número llega como `1234`, eliminando la ambigüedad completamente. El manejo de comas y puntos combinados que se describe en la Fase 3 es exclusivamente una **red de seguridad para doble falla** (OCR que produce separadores y revisión humana que no los detecta), no el camino normal de los datos.
 
 ### 1.2 Verificación manual de calidad
 
@@ -90,7 +88,9 @@ Se manejan tres tipos de variantes:
 | Guión omitido     | `SS Valparaíso San Antonio`     | `SS Valparaíso - San Antonio` |
 | Sin tilde         | `SS Araucania Sur`              | `SS Araucanía Sur`            |
 
-Si un nombre no coincide con ninguna variante conocida, se carga con el valor original y se registra un `warning` en el log. La segunda capa de normalización (Fase 4) puede corregirlo.
+El matching por coincidencia exacta tiene prioridad. Si ninguna clave exacta coincide, se aplica un matching parcial ordenado de mayor a menor especificidad (longitud de clave), para evitar que una clave corta como `"metropolitano sur"` sea subcadena de `"metropolitano sur oriente"` y produzca una asignación incorrecta. Cualquier coincidencia parcial se registra como `WARNING` en el log para revisión manual.
+
+Si un nombre no coincide con ninguna variante conocida, se carga con el valor original y se registra un `WARNING`. La segunda capa de normalización (Fase 4) puede corregirlo.
 
 ### 3.3 Normalización del tipo de prestación
 
@@ -101,25 +101,45 @@ Si un nombre no coincide con ninguna variante conocida, se carga con el valor or
 | `CNE`, `Consulta Nueva de Especialidad`, `Consulta Nueva`     | `CNE`           |
 | `IQ`, `Cirugía`, `Intervención Quirúrgica`, `Int. Quirúrgica` | `IQ`            |
 
-### 3.4 Conversión de valores numéricos
+### 3.4 Normalización del nivel de atención
 
-**Regla:** todos los campos numéricos se convierten a número decimal con la siguiente lógica, construida sobre la garantía de la Fase 1 (el OCR no usa separadores de miles):
+**Regla:** todos los valores de nivel de atención se normalizan a uno de tres valores estándar mediante un mapa explícito:
 
-| Formato de entrada | Interpretación                                        |
-| ------------------ | ----------------------------------------------------- |
-| `1234`             | 1.234 (entero)                                        |
-| `1234,5`           | 1.234,5 (coma = decimal, por garantía OCR)            |
-| `0,365`            | 0,365 (coma = decimal, aunque tenga 3 dígitos)        |
-| `1234.5`           | 1.234,5 (punto = decimal)                             |
-| `1.234,5`          | 1.234,5 (ambos presentes → punto=miles, coma=decimal) |
-| `N/D`, `-`, vacío  | `NULL`                                                |
-| Valores negativos  | `NULL` + advertencia en el log                        |
+| Variantes reconocidas                          | Valor estándar |
+| ---------------------------------------------- | -------------- |
+| `Primario`, `Nivel Primario`, `Primer Nivel`   | `Primario`     |
+| `Secundario`, `Nivel Secundario`, `2° Nivel`   | `Secundario`   |
+| `Terciario`, `Nivel Terciario`, `Tercer Nivel` | `Terciario`    |
 
-**Nota sobre la coma:** dado que el OCR está instruido para no usar coma como separador de miles, cualquier coma en el output del OCR es siempre un separador decimal. Por eso, `1,200` se convierte a `1.2` y no a `1200`. Esta regla elimina la ambigüedad sin necesidad de heurísticas adicionales.
+Si el valor no coincide con ninguna variante reconocida, se aplica `.title()` como fallback y se registra un `WARNING`. El check `check_niveles_atencion` en `validacion.py` cuantifica el impacto sobre `v_pct_nivel_terciario`.
+
+### 3.5 Conversión de valores numéricos
+
+**Caso normal (OCR configurado correctamente):** los números llegan como enteros limpios o con punto decimal y se convierten directamente a `float`. Este es el único caso que debería ocurrir en operación normal.
+
+**Red de seguridad (doble falla OCR + revisión humana):** si a pesar de la configuración del OCR y la revisión manual llegan valores con separadores, se aplica la siguiente lógica:
+
+| Formato de entrada | Resultado | Condición                                                       |
+| ------------------ | --------- | --------------------------------------------------------------- |
+| `1234`             | `1234.0`  | Caso normal — entero limpio                                     |
+| `1234.5`           | `1234.5`  | Caso normal — decimal con punto                                 |
+| `1234,5`           | `1234.5`  | Falla OCR: coma interpretada como decimal                       |
+| `0,365`            | `0.365`   | Falla OCR: coma interpretada como decimal (3 dígitos post-coma) |
+| `1.234,5`          | `1234.5`  | Falla OCR: punto=miles, coma=decimal (formato europeo)          |
+| `1,234.5`          | `1.234`   | Doble falla: código asume europeo, resultado incorrecto¹        |
+| `N/D`, `-`, vacío  | `NULL`    | Marcador de no disponible                                       |
+| Valores negativos  | `NULL`    | Aberrante en este dominio; se registra `WARNING` en el log      |
+
+> ¹ Cuando ambos separadores están presentes, el código asume formato europeo
+> (punto = miles, coma = decimal). Si el valor real era `1,234.5` en formato
+> americano (1234.5), el resultado sería `1.234` (incorrecto). Este caso
+> requiere doble falla simultánea: OCR que produce separadores a pesar de la
+> configuración **y** revisión humana que no detecta el error. En condiciones
+> normales de operación este formato no debería llegar al pipeline.
 
 **Nota sobre negativos:** los valores negativos son aberrantes en este dominio (días de espera, conteos de personas). Si aparecen como resultado de un error de OCR, se descartan como `NULL` con una advertencia en el log, evitando que violen el `CHECK CONSTRAINT` de la base de datos.
 
-### 3.5 Cálculo de asimetría
+### 3.6 Cálculo de asimetría
 
 **Regla:** la columna `asimetria` se calcula automáticamente como:
 
@@ -129,7 +149,7 @@ asimetria = promedio_dias – mediana_dias
 
 Si cualquiera de los dos componentes es `NULL`, `asimetria` también queda `NULL`. No se hacen estimaciones parciales.
 
-**Interpretación:** valores altos indican que hay casos con esperas muy largas que elevan el promedio por encima de la mediana (cola larga). Valores cercanos a cero indican una distribución más homogénea.
+**Interpretación:** valores altos indican que hay casos con esperas muy largas que elevan el promedio por encima de la mediana (cola larga). Valores cercanos a cero indican una distribución más homogénea. El valor puede ser negativo si la mediana supera al promedio, lo que es inusual pero posible en distribuciones con sesgo a la izquierda.
 
 ---
 
@@ -141,7 +161,7 @@ Después de la ingesta, se ejecuta `pipeline/transform/run_transformations.py`, 
 
 **Regla:** se aplica una segunda pasada de normalización sobre los `ss_id` que no quedaron estandarizados en la Fase 3. Usa dos mecanismos:
 
-1. **Tabla de correcciones exactas:** lista exhaustiva de variantes conocidas con su valor correcto.
+1. **Normalización exacta desde catálogo:** un único `UPDATE` con `JOIN` contra una tabla temporal que contiene todas las variantes de `SS_ID_MAP` (clave directa más prefijos `ss`, `s.s.`, `servicio de salud`). Es eficiente: una sola sentencia SQL independiente del tamaño del catálogo.
 2. **Coincidencia parcial:** para variantes no previstas, se usan condiciones `ILIKE` con patrones inequívocos (ej: cualquier valor que contenga `metropolitano sur oriente` → `SS Metropolitano Sur Oriente`).
 
 Cada corrección queda registrada en la columna `observaciones` del registro, con el valor original y el valor corregido, garantizando trazabilidad completa.
@@ -164,13 +184,25 @@ Si la suma de `reg_24a36m` + `reg_mayor_36m` supera `registros_espera`, se marca
 
 ---
 
+## Nota sobre `observaciones` en re-cargas
+
+La columna `observaciones` acumula anotaciones de tres fuentes:
+
+1. **Fuente original** (Excel): notas manuales del proceso de estructuración, si las hay.
+2. **Normalización** (Fases 3 y 4): registros de correcciones automáticas de `ss_id`.
+3. **Alertas de calidad** (Fase 4): marcas como `ALERTA: suma de tramos de antigüedad supera registros_espera`.
+
+Al re-cargar el mismo Excel (por corrección de datos), el `UPSERT` **preserva** el valor existente en la base de datos si ya contiene anotaciones, y solo usa el valor del Excel si la columna está vacía en la BD. Esto garantiza que las alertas y correcciones agregadas por las transformaciones no se pierdan. Las transformaciones son idempotentes y re-agregan las anotaciones si corresponde.
+
+---
+
 ## Resumen del flujo de limpieza
 
 ```
 PDF / imagen (Glosa 06)
         │
         ▼
-[Fase 1] OCR sin separadores de miles (ni punto ni coma)
+[Fase 1] OCR sin separadores de miles
          + verificación manual de 3 valores al azar
         │
         ▼
@@ -183,15 +215,18 @@ PDF / imagen (Glosa 06)
 [Fase 3] excel_a_sql.py (Python)
          - Filtrado de filas de totales en las 3 hojas
          - Normalización de ss_id (desde pipeline/config/catalogos.py)
+           · matching exacto primero
+           · matching parcial por especificidad (mayor longitud = mayor prioridad)
+         - Normalización de nivel_atencion (mapa explícito + fallback title())
          - Normalización de tipo_prestacion
-         - Conversión numérica: coma = decimal (garantía OCR)
+         - Conversión numérica: caso normal = entero o punto decimal limpio
          - Negativos descartados como NULL
          - Cálculo de asimetría
-         - UPSERT idempotente en PostgreSQL
+         - UPSERT idempotente en PostgreSQL (preserva observaciones existentes)
         │
         ▼
 [Fase 4] normalize_services.sql + clean_waitlists.sql (SQL)
-         - Segunda normalización de ss_id
+         - Segunda normalización de ss_id (UPDATE único + ILIKE fallback)
          - Recálculo de asimetría faltante
          - Detección y marcado de incoherencias
         │
@@ -206,6 +241,7 @@ Dataset limpio en PostgreSQL
 
 - **Sin imputación:** los valores no disponibles se codifican como `NULL`. No se estiman ni reemplazan por promedios u otros valores.
 - **Trazabilidad:** cada corrección automática queda registrada en la columna `observaciones` del registro afectado.
+- **Preservación de metadatos:** en re-cargas, `observaciones` no se sobreescribe si ya contiene anotaciones de transformaciones anteriores.
 - **Idempotencia:** todos los scripts de limpieza pueden ejecutarse múltiples veces sobre los mismos datos sin producir resultados distintos.
 - **Fuente única de verdad:** el catálogo de Servicios de Salud (nombres canónicos y aliases) está centralizado en `pipeline/config/catalogos.py`. No debe duplicarse en otros archivos.
 - **Transparencia:** las limitaciones de disponibilidad de datos por período se documentan en `docs/limitaciones.md`.

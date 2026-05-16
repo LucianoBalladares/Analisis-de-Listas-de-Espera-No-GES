@@ -32,6 +32,7 @@ if str(_ROOT) not in sys.path:
 
 import pandas as pd
 import psycopg2
+from psycopg2 import sql                    
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 
@@ -127,6 +128,21 @@ TIPO_PRESTACION_MAP = {
     "quirúrgica":                       "IQ",
 }
 
+NIVEL_ATENCION_MAP: dict[str, str] = {
+    "primario":           "Primario",
+    "nivel primario":     "Primario",
+    "1° nivel":           "Primario",
+    "primer nivel":       "Primario",
+    "secundario":         "Secundario",
+    "nivel secundario":   "Secundario",
+    "2° nivel":           "Secundario",
+    "segundo nivel":      "Secundario",
+    "terciario":          "Terciario",
+    "nivel terciario":    "Terciario",
+    "3° nivel":           "Terciario",
+    "tercer nivel":       "Terciario",
+}
+
 # ── Funciones auxiliares ───────────────────────────────────────────────────────
 
 def parse_trimestre(filepath: Path) -> str:
@@ -157,14 +173,23 @@ def clean_numeric(val) -> float | None:
     """
     Convierte un valor a float tolerando formatos numéricos post-OCR.
 
+    En condiciones normales el OCR está configurado para no usar separadores
+    de miles (ni punto ni coma), por lo que los números llegan como enteros
+    limpios ('1234') o con punto decimal ('1234.5'). El manejo de comas y
+    puntos combinados es una red de seguridad para doble falla (OCR + revisión
+    humana), no el camino normal de datos.
+
     Formatos manejados:
-        "1234"      → 1234.0
-        "1234,5"    → 1234.5  (coma decimal — OCR configurado sin sep. de miles)
-        "1234.5"    → 1234.5  (punto decimal)
-        "1.234,5"   → 1234.5  (punto miles + coma decimal, ambos presentes)
-        "1,234.5"   → 1234.5  (coma miles + punto decimal, ambos presentes)
-        "N/D", "-"  → None
-        Negativos   → None (aberrantes en este dominio; se loguean)
+        '1234'     → 1234.0  (caso normal — entero limpio del OCR)
+        '1234.5'   → 1234.5  (caso normal — decimal con punto)
+        '1234,5'   → 1234.5  (coma decimal — falla OCR documentada)
+        '0,365'    → 0.365   (coma decimal, aunque tenga 3 dígitos post-coma)
+        '1.234,5'  → 1234.5  (ambos separadores: se asume punto=miles, coma=decimal)
+        '1,234.5'  → 1.234   (ambos separadores: se asume punto=miles, coma=decimal;
+                               si el valor real era 1234.5 en formato americano,
+                               el resultado es incorrecto — requiere doble falla)
+        'N/D', '-' → None
+        Negativos  → None (aberrantes en este dominio; se loguean)
     """
     if pd.isna(val):
         return None
@@ -176,6 +201,8 @@ def clean_numeric(val) -> float | None:
         return None
 
     if ',' in s and '.' in s:
+        # Ambos separadores presentes: se asume formato europeo
+        # (punto = miles, coma = decimal).
         s = s.replace('.', '').replace(',', '.')
     elif ',' in s:
         parts = s.split(',')
@@ -216,6 +243,23 @@ def normalize_tipo_prestacion(val) -> str | None:
     return result
 
 
+
+def normalize_nivel_atencion(val) -> str | None:
+    if pd.isna(val):
+        return None
+    cleaned = str(val).strip()
+    key = cleaned.lower()
+    result = NIVEL_ATENCION_MAP.get(key)
+    if result is not None:
+        return result
+    fallback = cleaned.title()
+    log.warning(
+        f"  nivel_atencion no reconocido: '{cleaned}' → usando '{fallback}' "
+        "(revisar con validacion.py → check_niveles_atencion)"
+    )
+    return fallback
+
+
 def normalize_ss_id(val) -> str | None:
     if pd.isna(val):
         return None
@@ -231,9 +275,11 @@ def normalize_ss_id(val) -> str | None:
     if key in SS_ID_MAP:
         return SS_ID_MAP[key]
 
-    for k, v in SS_ID_MAP.items():
+    for k, v in sorted(SS_ID_MAP.items(), key=lambda x: len(x[0]), reverse=True):
         if k in key or key in k:
-            log.debug(f"  ss_id '{raw}' → '{v}' (coincidencia parcial)")
+            log.warning(
+                f"  ss_id '{raw}' → '{v}' (coincidencia parcial, verificar manualmente)"
+            )
             return v
 
     log.warning(f"  ss_id no reconocido: '{raw}' — se usará el valor original")
@@ -323,10 +369,11 @@ def process_personas_nacional(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
     df = df.dropna(subset=["tipo_prestacion"])
 
-    df["personas_total"] = (
-        df["personas_total"].apply(clean_numeric) if "personas_total" in df.columns
-        else None
-    )
+    if "personas_total" in df.columns:
+        df["personas_total"] = df["personas_total"].apply(clean_numeric)
+    else:
+        df["personas_total"] = pd.NA
+
     df["trimestre"] = trimestre
     return df.reset_index(drop=True)
 
@@ -343,13 +390,14 @@ def process_nivel_atencion(df: pd.DataFrame, trimestre: str) -> pd.DataFrame:
 
     df = _filter_total_rows(df, "nivel_atencion", "nivel_atencion")
     df["tipo_prestacion"] = df["tipo_prestacion"].apply(normalize_tipo_prestacion)
-    df["nivel_atencion"] = df["nivel_atencion"].str.strip().str.title()
+    df["nivel_atencion"] = df["nivel_atencion"].apply(normalize_nivel_atencion)
+
     df = df.dropna(subset=["nivel_atencion", "tipo_prestacion"])
 
     df["registros_total_nivel"] = (
         df["registros_total_nivel"].apply(clean_numeric)
         if "registros_total_nivel" in df.columns
-        else None
+        else pd.NA
     )
     df["trimestre"] = trimestre
     return df.reset_index(drop=True)
@@ -368,11 +416,13 @@ def _count_existing(conn, tabla: str, trimestre: str) -> int:
     """
     Cuenta las filas que ya existen en la tabla para el trimestre dado.
     Usado antes del UPSERT para estimar cuántas serán inserciones nuevas
-    vs actualizaciones de registros existentes (FIX M4).
+    vs actualizaciones de registros existentes.
     """
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT COUNT(*) FROM {tabla} WHERE trimestre = %s",
+            sql.SQL("SELECT COUNT(*) FROM {} WHERE trimestre = %s").format(
+                sql.Identifier(tabla)
+            ),
             (trimestre,),
         )
         return cur.fetchone()[0]
@@ -414,7 +464,7 @@ def upsert_listas_espera(conn, df: pd.DataFrame) -> tuple[int, int]:
         "reg_24a36m", "reg_mayor_36m", "fuente", "observaciones",
     ]
     rows = [_to_row(r, cols) for _, r in df.iterrows()]
-    sql = """
+    sql_stmt = """
         INSERT INTO listas_espera_ss_trimestre
             (ss_id, trimestre, tipo_prestacion, personas_espera, registros_espera,
              mediana_dias, promedio_dias, asimetria, reg_24a36m, reg_mayor_36m,
@@ -429,11 +479,14 @@ def upsert_listas_espera(conn, df: pd.DataFrame) -> tuple[int, int]:
             reg_24a36m         = EXCLUDED.reg_24a36m,
             reg_mayor_36m      = EXCLUDED.reg_mayor_36m,
             fuente             = EXCLUDED.fuente,
-            observaciones      = EXCLUDED.observaciones,
+            observaciones      = COALESCE(
+                                     listas_espera_ss_trimestre.observaciones,
+                                     EXCLUDED.observaciones
+                                 ),
             updated_at         = NOW()
     """
     with conn.cursor() as cur:
-        execute_values(cur, sql, rows)
+        execute_values(cur, sql_stmt, rows)
 
     return _compute_insert_update(len(rows), pre_count)
 
@@ -449,7 +502,7 @@ def upsert_personas_nacional(conn, df: pd.DataFrame) -> tuple[int, int]:
 
     cols = ["trimestre", "tipo_prestacion", "personas_total"]
     rows = [_to_row(r, cols) for _, r in df.iterrows()]
-    sql = """
+    sql_stmt = """
         INSERT INTO personas_nacional_trimestre (trimestre, tipo_prestacion, personas_total)
         VALUES %s
         ON CONFLICT (trimestre, tipo_prestacion) DO UPDATE SET
@@ -457,7 +510,7 @@ def upsert_personas_nacional(conn, df: pd.DataFrame) -> tuple[int, int]:
             updated_at     = NOW()
     """
     with conn.cursor() as cur:
-        execute_values(cur, sql, rows)
+        execute_values(cur, sql_stmt, rows)
 
     return _compute_insert_update(len(rows), pre_count)
 
@@ -473,7 +526,7 @@ def upsert_nivel_atencion(conn, df: pd.DataFrame) -> tuple[int, int]:
 
     cols = ["nivel_atencion", "trimestre", "tipo_prestacion", "registros_total_nivel"]
     rows = [_to_row(r, cols) for _, r in df.iterrows()]
-    sql = """
+    sql_stmt = """
         INSERT INTO nivel_atencion_trimestre
             (nivel_atencion, trimestre, tipo_prestacion, registros_total_nivel)
         VALUES %s
@@ -482,7 +535,7 @@ def upsert_nivel_atencion(conn, df: pd.DataFrame) -> tuple[int, int]:
             updated_at            = NOW()
     """
     with conn.cursor() as cur:
-        execute_values(cur, sql, rows)
+        execute_values(cur, sql_stmt, rows)
 
     return _compute_insert_update(len(rows), pre_count)
 
@@ -503,7 +556,6 @@ def log_pipeline_run(
 ):
     """
     Registra una ejecución en pipeline_runs.
-
     """
     with conn.cursor() as cur:
         cur.execute("""
@@ -569,7 +621,6 @@ def main(filepath: str):
                 omitidas  = n_raw - len(df_clean)
 
                 n_inserted, n_updated = upsert_fn(conn, df_clean)
-                cargadas = n_inserted + n_updated
 
                 estado = "warning" if omitidas > 0 else "ok"
                 log_pipeline_run(

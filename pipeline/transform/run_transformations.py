@@ -159,7 +159,6 @@ def split_statements(sql: str) -> list[str]:
 def execute_sql_file(conn, filepath: Path) -> dict:
     """
     Ejecuta todas las sentencias de un archivo SQL dentro de una transacción.
-
     """
     if not filepath.exists():
         raise FileNotFoundError(f"Archivo SQL no encontrado: {filepath}")
@@ -177,8 +176,6 @@ def execute_sql_file(conn, filepath: Path) -> dict:
                 cur.execute(stmt)
 
                 if cur.description is not None:
-                    # Sentencia SELECT: capturar y loguear resultados.
-                    # cur.description != None identifica SELECTs en psycopg2.
                     rows = cur.fetchall()
                     if rows:
                         col_names = [d[0] for d in cur.description]
@@ -215,14 +212,11 @@ def create_canonical_temp_table(conn) -> dict:
     Crea la tabla temporal de sesión _ss_canonicos con los nombres canónicos
     de SS_CANONICOS en catalogos.py.
 
-    Sobre la persistencia de la tabla temporal:
-        PostgreSQL mantiene las tablas temporales durante toda la sesión, no
-        solo durante la transacción activa. Esto significa que la tabla persiste
-        tras el COMMIT de este paso y está disponible cuando normalize_services.sql
-        se ejecuta en su propia transacción a continuación.
-        Si la sesión se cierra y se abre una nueva, la tabla se recrea en el
-        siguiente run del pipeline. CREATE TEMP TABLE IF NOT EXISTS garantiza
-        que una segunda ejecución dentro de la misma sesión no falle.
+    PostgreSQL mantiene las tablas temporales durante toda la sesión, no
+    solo durante la transacción activa. La tabla persiste tras el COMMIT
+    de este paso y está disponible cuando normalize_services.sql se ejecuta
+    en su propia transacción a continuación.
+    CREATE TEMP TABLE IF NOT EXISTS garantiza idempotencia dentro de la sesión.
     """
     with conn.cursor() as cur:
         cur.execute("""
@@ -249,44 +243,56 @@ def create_canonical_temp_table(conn) -> dict:
 def execute_catalog_normalization(conn) -> dict:
     """
     Normaliza ss_id usando SS_ID_MAP de catalogos.py como única fuente
-    de verdad, reemplazando la tabla de correcciones exactas (CTE) que
-    antes estaba hardcodeada en normalize_services.sql.
+    de verdad, ejecutando un único UPDATE con JOIN contra una tabla temporal
+    de mapeo en lugar de N×4 sentencias individuales.
 
-    Para cada (raw_key → canonical) de SS_ID_MAP, reconstruye las
-    variantes con prefijo que podrían haber llegado a la BD si Python
-    no las normalizó, y ejecuta un UPDATE case-insensitive.
+    Variantes de prefijo generadas por cada clave de SS_ID_MAP:
+        raw_key                        (ej: 'arica')
+        'ss ' + raw_key                (ej: 'ss arica')
+        's.s. ' + raw_key              (ej: 's.s. arica')
+        'servicio de salud ' + raw_key (ej: 'servicio de salud arica')
+
+    ON CONFLICT DO NOTHING en el INSERT maneja colisiones cuando una clave
+    ya existe con prefijo explícito en SS_ID_MAP (ej: 'ss arica' es clave
+    directa y también se genera como 'ss ' + 'arica').
     """
-
-    def build_variants(raw_key: str) -> list[str]:
-        return [
-            raw_key,
-            f"ss {raw_key}",
-            f"s.s. {raw_key}",
-            f"servicio de salud {raw_key}",
-        ]
-
-    total_affected = 0
-    executed = 0
+    # Construir todas las variantes (raw → canonical)
+    all_variants: list[tuple[str, str]] = []
+    for raw_key, canonical in SS_ID_MAP.items():
+        for prefix in ("", "ss ", "s.s. ", "servicio de salud "):
+            all_variants.append((f"{prefix}{raw_key}", canonical))
 
     with conn.cursor() as cur:
-        for raw_key, canonical in SS_ID_MAP.items():
-            for variant in build_variants(raw_key):
-                cur.execute("""
-                    UPDATE listas_espera_ss_trimestre
-                    SET ss_id = %s,
-                        observaciones = COALESCE(observaciones || ' | ', '') ||
-                                        'ss_id normalizado (catálogo): ' || ss_id || ' → ' || %s,
-                        updated_at    = NOW()
-                    WHERE LOWER(TRIM(ss_id)) = %s
-                      AND ss_id <> %s
-                """, (canonical, canonical, variant, canonical))
+        # Tabla temporal de mapeo (persiste durante la sesión)
+        cur.execute("""
+            CREATE TEMP TABLE IF NOT EXISTS _ss_norm_map (
+                raw       TEXT PRIMARY KEY,
+                canonical TEXT NOT NULL
+            )
+        """)
+        cur.execute("TRUNCATE _ss_norm_map")
+        execute_values(
+            cur,
+            "INSERT INTO _ss_norm_map (raw, canonical) VALUES %s ON CONFLICT DO NOTHING",
+            all_variants,
+        )
 
-                total_affected += cur.rowcount
-                executed += 1
+        # UPDATE único con JOIN: solo toca filas que necesitan normalización
+        cur.execute("""
+            UPDATE listas_espera_ss_trimestre l
+            SET ss_id = m.canonical,
+                observaciones = COALESCE(l.observaciones || ' | ', '') ||
+                                'ss_id normalizado (catálogo): ' || l.ss_id || ' → ' || m.canonical,
+                updated_at    = NOW()
+            FROM _ss_norm_map m
+            WHERE LOWER(TRIM(l.ss_id)) = m.raw
+              AND l.ss_id <> m.canonical
+        """)
+        total_affected = cur.rowcount
 
     return {
         "archivo":         "catalog_normalization (catalogos.py → SS_ID_MAP)",
-        "sentencias":      executed,
+        "sentencias":      3,
         "filas_afectadas": total_affected,
     }
 
