@@ -208,7 +208,7 @@ def execute_sql_file(conn, filepath: Path) -> dict:
     }
 
 
-# ── Paso 0b: Tabla temporal _ss_canonicos (FIX C1) ────────────────────────────
+# ── Paso 0b: Tabla temporal _ss_canonicos ─────────────────────────────────────
 
 def create_canonical_temp_table(conn) -> dict:
     """
@@ -415,23 +415,23 @@ def main():
 
     try:
         # ── Paso 0: Normalización exacta desde SS_ID_MAP (catalogos.py) ───────
-        ok = _run_step(
+        step_ok = _run_step(
             "0 — catalog_normalization (SS_ID_MAP de catalogos.py)",
             execute_catalog_normalization,
             conn, trimestre,
         )
-        if not ok:
+        if not step_ok:
             log.error("  Deteniendo pipeline: la normalización de catálogo es prerequisito.")
             has_errors = True
 
         # ── Paso 0b: Tabla temporal _ss_canonicos ─────────────────────────────
         if not has_errors:
-            ok = _run_step(
+            step_ok = _run_step(
                 "0b — temp table _ss_canonicos (SS_CANONICOS de catalogos.py)",
                 create_canonical_temp_table,
                 conn, trimestre,
             )
-            if not ok:
+            if not step_ok:
                 log.error(
                     "  Deteniendo: _ss_canonicos es prerequisito de normalize_services.sql."
                 )
@@ -440,12 +440,12 @@ def main():
         # ── Pasos SQL (solo si pasos 0 y 0b fueron exitosos) ─────────────────
         if not has_errors:
             for sql_file in TRANSFORMATIONS:
-                ok = _run_step(
+                step_ok = _run_step(
                     sql_file.name,
                     lambda c, f=sql_file: execute_sql_file(c, f),
                     conn, trimestre,
                 )
-                if not ok:
+                if not step_ok:
                     has_errors = True
                     if "normalize_services" in sql_file.name:
                         log.error(
