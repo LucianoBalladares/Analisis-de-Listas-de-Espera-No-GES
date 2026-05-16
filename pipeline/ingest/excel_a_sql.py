@@ -3,7 +3,7 @@ Ingesta de datos desde Excel trimestral a PostgreSQL.
 
 Uso:
     python pipeline/ingest/excel_a_sql.py <ruta/al/archivo.xlsx>
-    python pipeline/ingest/excel_a_sql.py data/staging/cleaned_excels/2024_T3.xlsx
+    python pipeline/ingest/excel_a_sql.py data/staging/2024_T3.xlsx
 
 El archivo debe seguir la convención: YYYY_T#.xlsx (ej: 2024_T3.xlsx).
 Puede contener hasta 3 hojas (ninguna es obligatoria):

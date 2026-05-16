@@ -29,7 +29,6 @@ data/staging/
 !data/raw/.gitkeep
 !data/raw/sources/.gitkeep
 !data/staging/.gitkeep
-!data/staging/cleaned_excels/.gitkeep
 
 # Datos procesados (archivos grandes)
 data/processed/*.xlsx

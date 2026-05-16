@@ -10,7 +10,7 @@ si cualquier paso falla con errores críticos:
 
 Uso:
     python pipeline/orchestration/pipeline_runner.py <ruta/al/archivo.xlsx>
-    python pipeline/orchestration/pipeline_runner.py data/staging/cleaned_excels/2024_T4.xlsx
+    python pipeline/orchestration/pipeline_runner.py data/staging/2024_T4.xlsx
 
     # Solo ingesta + validación (omitir transformaciones):
     python pipeline/orchestration/pipeline_runner.py 2024_T4.xlsx --skip-transform
@@ -69,7 +69,7 @@ def parse_args():
     parser = ArgumentParser(description=__doc__)
     parser.add_argument(
         "excel",
-        help="Ruta al archivo Excel trimestral (ej: data/staging/cleaned_excels/2024_T4.xlsx)",
+        help="Ruta al archivo Excel trimestral (ej: data/staging/2024_T4.xlsx)",
     )
     parser.add_argument(
         "--skip-transform",

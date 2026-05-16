@@ -127,20 +127,18 @@ psql -U postgres -d listas_espera_ges -f sql/views/dashboard_views.sql
 
 > **Nota sobre directorios:**
 >
-> - `data/staging/cleaned_excels/` → aquí van los archivos Excel producidos por el
+> - `data/staging/` → aquí van los archivos Excel producidos por el
 >   proceso OCR + estructuración manual. **El pipeline lee desde este directorio.**
 > - `data/processed/` → exportaciones y artefactos de salida generados _por_ el
 >   pipeline hacia afuera (CSVs, tablas para compartir). **No es un directorio de entrada.**
->
-> Antes de correr el pipeline por primera vez, mueve los excels a
-> `data/staging/cleaned_excels/`, no a `data/processed/`.
+
 
 ```bash
 # Opción A: orquestador automático (recomendado)
-python pipeline/orchestration/pipeline_runner.py data/staging/cleaned_excels/2024_T4.xlsx
+python pipeline/orchestration/pipeline_runner.py data/staging/2024_T4.xlsx
 
 # Opción B: pasos manuales
-python pipeline/ingest/excel_a_sql.py data/staging/cleaned_excels/2024_T4.xlsx
+python pipeline/ingest/excel_a_sql.py data/staging/2024_T4.xlsx
 python pipeline/ingest/validacion.py 2024_T4
 python pipeline/transform/run_transformations.py --trimestre 2024_T4
 ```
