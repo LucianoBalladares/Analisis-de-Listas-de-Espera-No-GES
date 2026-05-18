@@ -70,8 +70,8 @@ NULL_VALUES = {
 }
 
 TOTAL_ROW_PATTERNS = re.compile(
-    r'^\s*(total|subtotal|país|pais|nacional|promedio\s+nacional|promedio\s+país'
-    r'|n\.?\s*a\.?|n/a)\s*$',
+    r'^\s*(total(\s+nacional)?|subtotal|país|pais|nacional|promedio\s+nacional'
+    r'|promedio\s+país|n\.?\s*a\.?|n/a)\s*$',
     flags=re.IGNORECASE | re.UNICODE,
 )
 
