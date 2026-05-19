@@ -120,4 +120,12 @@ SS_ID_MAP: dict[str, str] = {
     "aysen":                            "SS Aysén",
     "aysén":                            "SS Aysén",
     "magallanes":                       "SS Magallanes",
+
+    # Variantes con guión sin espacios (OCR de algunos períodos)──────
+    "valparaíso-san antonio":           "SS Valparaíso - San Antonio",
+    "valparaiso-san antonio":           "SS Valparaíso - San Antonio",
+    "viña del mar-quillota":            "SS Viña del Mar - Quillota",
+    "vina del mar-quillota":            "SS Viña del Mar - Quillota",
+    "metropolitano sur-oriente":        "SS Metropolitano Sur Oriente",
+    "del maule":                        "SS Maule",
 }

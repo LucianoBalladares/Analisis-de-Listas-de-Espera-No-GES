@@ -22,6 +22,7 @@ import sys
 import logging
 from pathlib import Path
 from argparse import ArgumentParser
+from pipeline.config.catalogos import SS_CANONICOS, SS_ESPECIALES
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_ROOT) not in sys.path:
@@ -330,18 +331,20 @@ def print_post_transform_report(conn, trimestre):
     ss_list = list(SS_CANONICOS)
 
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        ss_list_completa = list(SS_CANONICOS) + list(SS_ESPECIALES)
+        placeholders = ", ".join(["%s"] * len(ss_list_completa))
         cur.execute(f"""
             SELECT COUNT(DISTINCT ss_id) AS ss_no_reconocidos
             FROM listas_espera_ss_trimestre
             WHERE ss_id NOT IN ({placeholders})
             {wh_and}
-        """, ss_list + params)
+        """, ss_list_completa + params)
         ss_issues = cur.fetchone()["ss_no_reconocidos"]
 
         cur.execute(f"""
             SELECT COUNT(*) AS alertas
             FROM listas_espera_ss_trimestre
-            WHERE observaciones LIKE '%ALERTA%'
+            WHERE observaciones LIKE '%%ALERTA%%'
             {wh_and}
         """, params)
         alertas = cur.fetchone()["alertas"]

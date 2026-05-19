@@ -250,7 +250,7 @@ def check_coherencia_antiguedad(conn, trimestre) -> int:
         SELECT {_COLS}
         FROM listas_espera_ss_trimestre
         {_BASE}
-          AND observaciones LIKE '%ALERTA: suma de tramos%'
+          AND observaciones LIKE '%%ALERTA: suma de tramos%%'
           {wh_and}
         ORDER BY trimestre, ss_id
     """, params)
@@ -260,7 +260,7 @@ def check_coherencia_antiguedad(conn, trimestre) -> int:
         FROM listas_espera_ss_trimestre
         {_BASE}
           AND (observaciones IS NULL
-               OR observaciones NOT LIKE '%ALERTA: suma de tramos%')
+               OR observaciones NOT LIKE '%%ALERTA: suma de tramos%%')
           {wh_and}
         ORDER BY trimestre, ss_id
     """, params)
