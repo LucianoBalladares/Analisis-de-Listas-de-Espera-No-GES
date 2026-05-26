@@ -13,7 +13,7 @@ import pytest
 import pandas as pd
 from pathlib import Path
 
-from pipeline.ingest.helpers import (
+from pipeline.ingest.excel_a_sql import (
     normalize_tipo_prestacion,
     normalize_nivel_atencion,
     normalize_ss_id,

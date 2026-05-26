@@ -9,8 +9,8 @@ SQL files can be executed safely one statement at a time.
 """
 import pytest
 
-from pipeline.transform.sql_utils import split_statements
-from pipeline.ingest.helpers import _compute_insert_update
+from pipeline.transform.run_transformations import split_statements
+from pipeline.ingest.excel_a_sql import _compute_insert_update
 
 
 # ── split_statements ───────────────────────────────────────────────────────────

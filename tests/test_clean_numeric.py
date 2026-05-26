@@ -14,7 +14,7 @@ import math
 import pytest
 import pandas as pd
 
-from pipeline.ingest.helpers import clean_numeric
+from pipeline.ingest.excel_a_sql import clean_numeric
 
 
 # ── Normal OCR output (no separators) ─────────────────────────────────────────
