@@ -38,7 +38,6 @@ Características:
 - Periodicidad trimestral
 - Nivel de agregación:
   - Nacional
-  - Regional
   - Servicio de Salud
 
 Contiene información sobre:
@@ -132,7 +131,7 @@ Interpretadas como proxy de riesgo sanitario y presencia de cola larga.
 #### Concentración en nivel terciario (`pct_nivel_terciario`)
 
 - Proporción de la demanda en establecimientos de alta complejidad.
-- Calculada sobre el total nacional de registros por período y tipo de prestación.
+- Calculada sobre el total nacional de registros por período.
 - Utilizada como proxy de **fragmentación funcional de la red asistencial**.
 - Disponible en la vista `v_pct_nivel_terciario`.
 - Requiere que los valores de `nivel_atencion` sean exactamente `'Primario'`, `'Secundario'` o `'Terciario'`. El check `check_niveles_atencion` en `validacion.py` verifica esto tras cada carga.
