@@ -60,7 +60,6 @@ CREATE TABLE IF NOT EXISTS nivel_atencion_trimestre (
     trimestre TEXT NOT NULL,
     tipo_prestacion TEXT NOT NULL,
     registros_total_nivel BIGINT,
-    -- M7: BIGINT (era NUMERIC(10,0))
     ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
