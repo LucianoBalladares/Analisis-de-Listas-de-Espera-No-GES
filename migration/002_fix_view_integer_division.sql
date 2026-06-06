@@ -1,29 +1,23 @@
 -- =================================================================
--- Fix: division entera en pct_mayor_24m y pct_mayor_36m
--- Archivo: fix_view_integer_division.sql
+-- Migración : 002_fix_view_integer_division.sql
+-- Fecha     : 2026-06-06
+-- Descripción: Corrige división entera BIGINT/BIGINT en los cálculos
+--              de pct_mayor_24m y pct_mayor_36m en la vista
+--              v_listas_espera_enriquecido.
 --
--- Problema:
---   BIGINT / BIGINT en PostgreSQL usa división entera (trunca decimales).
---   (reg_24a36m + reg_mayor_36m) / registros_espera * 100
---   = 1000 / 6000 * 100
---   = 0 * 100   ← truncamiento a 0 antes de multiplicar
---   = 0
+--              El bug causaba que la mayoría de los porcentajes
+--              se calcularan como 0 por truncamiento antes de
+--              multiplicar por 100.
 --
--- Solución:
---   Castear el numerador a NUMERIC antes de la división.
---   Esto fuerza división de punto flotante en todo el cálculo.
+--              Fix: ::NUMERIC en el numerador fuerza división
+--              de punto flotante en toda la expresión.
 --
--- Ejecución:
---   psql -U postgres -d listas_espera_ges -f fix_view_integer_division.sql
---
--- Verificación post-ejecución:
---   SELECT ss_id, trimestre, reg_24a36m, reg_mayor_36m,
---          registros_espera, pct_mayor_24m, pct_mayor_36m
---   FROM v_listas_espera_enriquecido
---   WHERE reg_24a36m IS NOT NULL
---     AND reg_mayor_36m IS NOT NULL
---   LIMIT 10;
+--              Aplicado en producción el 2026-06-06.
+--              La corrección está incorporada en
+--              sql/views/dashboard_views.sql desde esa fecha.
 -- =================================================================
+-- (Solo se preserva como registro histórico de la corrección.)
+-- La sentencia real ya está en sql/views/dashboard_views.sql.
 CREATE OR REPLACE VIEW v_listas_espera_enriquecido AS
 SELECT l.id,
     l.ss_id,

@@ -134,7 +134,6 @@ psql -U postgres -d listas_espera_ges -f sql/views/dashboard_views.sql
 > - `data/processed/` → exportaciones y artefactos de salida generados _por_ el
 >   pipeline hacia afuera (CSVs, tablas para compartir). **No es un directorio de entrada.**
 
-
 ```bash
 # Opción A: orquestador automático (recomendado)
 python pipeline/orchestration/pipeline_runner.py data/staging/2024_T4.xlsx
@@ -162,7 +161,51 @@ python pipeline/transform/run_transformations.py --trimestre 2024_T4
 
 > Todos los comandos deben ejecutarse desde la **raíz del repositorio**.
 
-### 5. Conectar Power BI al dashboard local
+### 5. Ejecutar tests
+
+El proyecto tiene dos tipos de tests. Usa siempre `python -m pytest`
+(no `pytest` directamente) para garantizar que se usa el Python del
+entorno virtual activo.
+
+```bash
+# Instalar dependencias de desarrollo (primera vez)
+pip install -r requirements-dev.txt
+```
+
+#### Tests unitarios — sin base de datos, rápidos
+
+Cubren parsers numéricos, normalizadores, catálogo de SS y utilidades SQL.
+
+```bash
+make test
+# equivalente: python -m pytest -m "not integration" -v
+```
+
+#### Tests de integración — requieren BD de test
+
+Cubren el ciclo completo: ingesta de Excel → PostgreSQL → transformaciones
+SQL → vistas. Requieren una base de datos de test separada.
+
+```bash
+# Primera vez: crear la BD de test
+psql -U postgres -c "CREATE DATABASE listas_espera_test;"
+
+# Correr tests de integración
+make test-integration
+# equivalente: python -m pytest tests/integration/ -m integration -v
+```
+
+Los tests de integración se saltan automáticamente si la BD de test
+no está disponible, sin interrumpir los tests unitarios.
+
+#### Todos los tests
+
+```bash
+make test-all
+# equivalente: python -m pytest -v
+```
+
+### 6. Conectar Power BI al dashboard local
 
 El dashboard público está disponible sin configuración adicional:
 
