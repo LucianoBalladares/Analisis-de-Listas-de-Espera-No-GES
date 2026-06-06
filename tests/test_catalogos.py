@@ -124,6 +124,13 @@ class TestSSIdMapIntegrity:
         assert len(SS_ID_MAP) >= 29
         assert len(SS_ID_MAP) < 500
 
+    def test_del_maule_is_canonical_not_maule(self):
+        #SS Del Maule es el nombre oficial en Glosa 06 (no SS Maule).
+        assert "SS Del Maule" in SS_CANONICOS
+        assert "SS Maule"     not in SS_CANONICOS
+        assert SS_ID_MAP.get("maule")     == "SS Del Maule"
+        assert SS_ID_MAP.get("del maule") == "SS Del Maule"
+
 
 class TestNivelesAtencion:
 

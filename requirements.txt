@@ -1,3 +1,6 @@
+# Python >= 3.10 requerido (usa sintaxis X | Y en type hints, PEP 604)
+# Verificar con: python --version
+
 # ── Ingesta y base de datos ────────────────────────────────────────
 pandas>=2.0
 openpyxl>=3.1          # lectura de archivos .xlsx
@@ -6,6 +9,11 @@ python-dotenv>=1.0     # lectura de variables de entorno desde .env
 
 # ── Validación y reporting ─────────────────────────────────────────
 tabulate>=0.9          # formato de tablas en consola
+
+# Dependencias de desarrollo y testing
+# pip install -r requirements-dev.txt
+
+pytest>=7.0
 
 # ── Notas de instalación ───────────────────────────────────────────
 # Crear entorno virtual primero:

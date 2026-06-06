@@ -1,7 +1,7 @@
 # Hallazgos del Análisis
 
 **Análisis Longitudinal de Listas de Espera NO GES en Chile (2021–2025)**
-Luciano Balladares · Mayo 2025
+Luciano Balladares · Mayo 2026
 
 > Este documento resume los hallazgos principales del análisis.
 > El informe completo y el dashboard interactivo están disponibles
@@ -371,7 +371,7 @@ Reportes trimestrales de listas de espera NO GES, 2021–2025.
 Y el repositorio:
 
 ```
-Balladares, L. (2025). Análisis Longitudinal de Listas de Espera NO GES en Chile (2021–2025).
+Balladares, L. (2026). Análisis Longitudinal de Listas de Espera NO GES en Chile (2021–2025).
 GitHub: https://github.com/LucianoBalladares/Analisis-de-Listas-de-Espera-No-GES
 ```
 

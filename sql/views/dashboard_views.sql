@@ -69,13 +69,16 @@ SELECT l.id,
         WHEN l.registros_espera > 0
         AND l.reg_24a36m IS NOT NULL
         AND l.reg_mayor_36m IS NOT NULL THEN ROUND(
-            (l.reg_24a36m + l.reg_mayor_36m) / l.registros_espera * 100,
+            (l.reg_24a36m + l.reg_mayor_36m)::NUMERIC / l.registros_espera * 100,
             1
         )
     END AS pct_mayor_24m,
     CASE
         WHEN l.registros_espera > 0
-        AND l.reg_mayor_36m IS NOT NULL THEN ROUND(l.reg_mayor_36m / l.registros_espera * 100, 1)
+        AND l.reg_mayor_36m IS NOT NULL THEN ROUND(
+            l.reg_mayor_36m::NUMERIC / l.registros_espera * 100,
+            1
+        )
     END AS pct_mayor_36m,
     -- Dimensiones temporales (facilitan fórmulas DAX y slicers)
     SUBSTRING(l.trimestre, 1, 4)::INT AS anio,
@@ -222,3 +225,26 @@ GROUP BY l.trimestre,
     l.tipo_prestacion
 ORDER BY l.trimestre,
     l.tipo_prestacion;
+-- -----------------------------------------------------------------
+-- 6. Dimensión de tipos de prestación
+-- Tabla de dimensión para el modelo de datos de Power BI.
+-- Importar y conectar en relación 1→muchos con tipo_prestacion de:
+--   v_listas_espera_enriquecido, v_disponibilidad_indicadores,
+--   v_pct_nivel_terciario
+-- -----------------------------------------------------------------
+CREATE OR REPLACE VIEW v_dim_tipo_prestacion AS
+SELECT tipo_prestacion,
+    CASE
+        tipo_prestacion
+        WHEN 'CNE' THEN 'Consulta Nueva de Especialidad'
+        WHEN 'IQ' THEN 'Intervención Quirúrgica'
+    END AS descripcion,
+    CASE
+        tipo_prestacion
+        WHEN 'CNE' THEN 1
+        WHEN 'IQ' THEN 2
+    END AS orden_display
+FROM (
+        VALUES ('CNE'),
+            ('IQ')
+    ) AS t(tipo_prestacion);

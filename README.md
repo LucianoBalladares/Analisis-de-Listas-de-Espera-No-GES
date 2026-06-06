@@ -96,6 +96,8 @@ El catálogo de los 29 Servicios de Salud vigentes (nombres canónicos y aliases
 ### 1. Preparar el entorno (una sola vez)
 
 ```bash
+# Requiere Python >= 3.10
+python --version   # debe mostrar 3.10.x o superior
 python -m venv .venv && source .venv/bin/activate   # Linux / macOS
 # .venv\Scripts\activate                             # Windows
 pip install -r requirements.txt

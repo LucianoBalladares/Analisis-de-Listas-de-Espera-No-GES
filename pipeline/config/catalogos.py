@@ -33,7 +33,7 @@ SS_CANONICOS: set[str] = {
     "SS Metropolitano Sur",
     "SS Metropolitano Sur Oriente",
     "SS O'Higgins",
-    "SS Maule",
+    "SS Del Maule",
     "SS Ñuble",
     "SS Concepción",
     "SS Arauco",
@@ -90,7 +90,7 @@ SS_ID_MAP: dict[str, str] = {
     # ── Centro-Sur ─────────────────────────────────────────────────
     "o'higgins":                        "SS O'Higgins",
     "ohiggins":                         "SS O'Higgins",
-    "maule":                            "SS Maule",
+    "maule":                            "SS Del Maule",
     "ñuble":                            "SS Ñuble",
     "nuble":                            "SS Ñuble",
     # ── Biobío ─────────────────────────────────────────────────────
@@ -127,5 +127,5 @@ SS_ID_MAP: dict[str, str] = {
     "viña del mar-quillota":            "SS Viña del Mar - Quillota",
     "vina del mar-quillota":            "SS Viña del Mar - Quillota",
     "metropolitano sur-oriente":        "SS Metropolitano Sur Oriente",
-    "del maule":                        "SS Maule",
+    "del maule":                        "SS Del Maule",
 }
