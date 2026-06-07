@@ -255,15 +255,21 @@ Para replicar localmente con tu propia base de datos:
 
 ## 8. Dashboard (Power BI)
 
-El dashboard permite:
+🔗 **[Ver dashboard interactivo en Power BI Service](https://app.powerbi.com/view?r=...)**
 
-- Comparar Servicios de Salud
-- Analizar la evolución de la mediana entre el primer y último trimestre con datos disponibles
-- Identificar concentración de demanda en nivel terciario
-- Detectar presencia de colas largas (casos extremos)
+El dashboard construye una narrativa analítica de 7 páginas: desde el panorama nacional
+de heterogeneidad hasta el análisis de recuperación territorial y la distribución por
+nivel de atención.
 
-🔗 Acceso:
-[LINK POWER BI](https://app.powerbi.com/view?r=eyJrIjoiNDFhZDFlMWYtYzhkMC00NjRjLWIzNzItMGY1MWEyNDUwZmE5IiwidCI6IjZmZDQ4ZjQxLWFmODEtNDVhNS05YzFlLWUzOTkwYmMyN2U3YyIsImMiOjR9)
+### Vista previa
+
+|                Panorama general (Pág. 1)                |             Perfiles operacionales (Pág. 4)             |
+| :-----------------------------------------------------: | :-----------------------------------------------------: |
+| ![Panorama](docs/screenshots/dashboard_p1_panorama.png) | ![Perfiles](docs/screenshots/dashboard_p4_perfiles.png) |
+
+|                  Dispersión y R² (Pág. 3)                   |                Recuperación territorial (Pág. 6)                |
+| :---------------------------------------------------------: | :-------------------------------------------------------------: |
+| ![Dispersión](docs/screenshots/dashboard_p3_dispersion.png) | ![Recuperación](docs/screenshots/dashboard_p6_recuperacion.png) |
 
 ---
 
