@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Unit Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests (no database required)
+        run: |
+          python -m pytest -m "not integration" -v --tb=short
+
+      - name: Check for import errors in pipeline modules
+        run: |
+          python -c "from pipeline.config.catalogos import SS_CANONICOS, SS_ID_MAP, NIVELES_ATENCION; print(f'Catalog OK: {len(SS_CANONICOS)} SS canónicos, {len(SS_ID_MAP)} aliases')"
+          python -c "from pipeline.ingest.excel_a_sql import clean_numeric, normalize_ss_id, normalize_tipo_prestacion; print('Ingest module OK')"
+          python -c "from pipeline.transform.run_transformations import split_statements; print('Transform module OK')"
