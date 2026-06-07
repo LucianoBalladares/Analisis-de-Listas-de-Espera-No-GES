@@ -37,6 +37,7 @@ data/processed/*.csv
 # Excepción: la muestra anonimizada sí se versiona
 !data/sample/
 !data/sample/*.csv
+!data/sample/*.xlsx
 
 # ── Power BI ──────────────────────────────────────────────────────
 # Los .pbix son binarios — no aptos para diff en git
