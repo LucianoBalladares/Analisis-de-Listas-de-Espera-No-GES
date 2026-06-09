@@ -5,7 +5,7 @@ Encadena los tres pasos en el orden correcto y detiene la ejecución
 si cualquier paso falla con errores críticos:
 
     1. Ingesta    → excel_a_sql.py      (carga UPSERT en PostgreSQL)
-    2. Validación → validacion.py       (8 checks de integridad)
+    2. Validación → validacion.py       (10 checks de integridad)
     3. Transform  → run_transformations.py  (normalización + limpieza SQL)
 
 Uso:

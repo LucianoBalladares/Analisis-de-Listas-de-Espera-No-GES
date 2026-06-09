@@ -45,10 +45,10 @@ recuperaron ambas dimensiones a ritmos distintos.
   y perfiles mixtos de congestión.
 
 > **Advertencia metodológica:** la comparación entre períodos debe hacerse con cautela.
-> El número de SS con datos de tramos de antigüedad disponibles varía entre trimestres:
-> en 2022_T3 la cobertura es mayor, mientras que en 2025_T4 los tramos figuran como
-> "información incompleta" según `docs/limitaciones.md`. Esto podría influir en los
-> valores de R² observados al final del período.
+> El número de SS con datos de tramos de antigüedad disponibles varía entre
+> trimestres: los tramos no están disponibles en el período 2024_T1–2025_T1.
+> La disponibilidad se restablece en 2025_T3. Esta variabilidad podría influir
+> parcialmente en los valores de R² observados durante ese intervalo.
 
 **Interpretación:** La caída del R² durante la recuperación refleja que los SS no
 mejoraron ambas dimensiones de manera proporcional. Algunos redujeron su mediana sin
@@ -107,8 +107,8 @@ sin convergencia territorial real.
 **Bottom 5 IQ en 2025_T4 (medianas más bajas):**
 
 - SS Araucanía Norte: 128 días
-- SS Talcahuano: 153 días
 - SS Aysén: 147 días
+- SS Talcahuano: 153 días
 - SS Antofagasta: 182 días
 - SS Arauco: 185 días
 
@@ -223,9 +223,9 @@ resiliencia operacional.
 | ------------------------- | ------- | ------- | --------- |
 | SS Los Ríos               | 1.080   | 189     | −891 días |
 | SS Valparaíso-San Antonio | 821     | 229     | −592 días |
+| SS Viña del Mar-Quillota  | 591     | 238     | −353 días |
 | SS Araucanía Sur          | 582     | 265     | −317 días |
 | SS Del Maule              | 512     | 203     | −309 días |
-| SS Viña del Mar-Quillota  | 591     | 238     | −353 días |
 
 **Matices importantes:**
 
@@ -331,13 +331,13 @@ Tres tensiones analíticas estructuran la discusión:
 
 ## Recomendaciones estratégicas
 
-| Eje                                    | Intervención central                                        | Impacto | Factibilidad |
-| -------------------------------------- | ----------------------------------------------------------- | ------- | ------------ |
-| Gestión segmentada por clúster         | Clasificar SS y asignar estrategia según perfil operacional | Alto    | Alta         |
-| Monitoreo multidimensional             | Panel con mediana + cola larga + trayectoria por SS         | Alto    | Alta         |
-| Reducción focalizada de backlog        | Operativos dirigidos a casos >24 y >36 meses                | Alto    | Media        |
-| Fortalecimiento resolución ambulatoria | Teleinterconsulta, triage especializado, coordinación APS   | Medio   | Media-Alta   |
-| Benchmarking institucional             | Sistematizar prácticas de SS con recuperación exitosa       | Medio   | Alta         |
+| Eje                                         | Intervención central                                        | Impacto | Factibilidad |
+| ------------------------------------------- | ----------------------------------------------------------- | ------- | ------------ |
+| Gestión segmentada según perfil operacional | Clasificar SS y asignar estrategia según perfil operacional | Alto    | Alta         |
+| Monitoreo multidimensional                  | Panel con mediana + cola larga + trayectoria por SS         | Alto    | Alta         |
+| Reducción focalizada de backlog             | Operativos dirigidos a casos >24 y >36 meses                | Alto    | Media        |
+| Fortalecimiento resolución ambulatoria      | Teleinterconsulta, triage especializado, coordinación APS   | Medio   | Media-Alta   |
+| Benchmarking institucional                  | Sistematizar prácticas de SS con recuperación exitosa       | Medio   | Alta         |
 
 ---
 

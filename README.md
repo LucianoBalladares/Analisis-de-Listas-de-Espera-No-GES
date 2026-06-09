@@ -270,11 +270,11 @@ Para replicar localmente con tu propia base de datos:
 
 | Variable              | Descripción                         | Disponibilidad                         |
 | --------------------- | ----------------------------------- | -------------------------------------- |
-| `mediana_dias`        | Mediana de días de espera           | 2022 T3 en adelante                    |
+| `mediana_dias`        | Mediana de días de espera           | 2022 T3 en adelante (excluye 2025 T2)  |
 | `personas_espera`     | Personas únicas en lista activa     | Variable por período                   |
 | `registros_espera`    | Total de registros en espera        | Completa                               |
-| `pct_mayor_24m`       | % registros con más de 24 meses     | Hasta 2023 T4 / desde 2025 T2          |
-| `pct_mayor_36m`       | % registros con más de 36 meses     | Hasta 2023 T4 / desde 2025 T2          |
+| `pct_mayor_24m`       | % registros con más de 24 meses     | Hasta 2023 T4 / desde 2025 T3          |
+| `pct_mayor_36m`       | % registros con más de 36 meses     | Hasta 2023 T4 / desde 2025 T3          |
 | `pct_nivel_terciario` | % demanda en nivel terciario        | Nacional, con discontinuidad 2023–2024 |
 | `asimetria`           | Diferencia entre promedio y mediana | Calculada automáticamente              |
 
