@@ -214,14 +214,6 @@ def check_coherencia_antiguedad(conn, trimestre) -> int:
     """
     Valida que la suma de los tramos de antigüedad no supere los registros totales.
 
-    FIX M6 — Distingue incoherencias conocidas vs nuevas:
-        CONOCIDAS: filas ya marcadas con 'ALERTA: suma de tramos' en observaciones
-                   por clean_waitlists.sql. Se reportan como warning; no bloquean
-                   el pipeline. Aparecen cuando la validación corre después de
-                   las transformaciones (health check manual).
-        NUEVAS:    filas con incoherencia no reconocida aún. Se reportan como error
-                   crítico y detienen el pipeline con exit code 1.
-
     Flujo normal (pipeline_runner, validación antes de transformaciones):
         Todas las incoherencias son "nuevas" → pipeline se detiene → usar --force
         si la incoherencia proviene de la fuente original (Glosa 06).

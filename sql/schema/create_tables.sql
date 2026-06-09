@@ -27,9 +27,7 @@ CREATE TABLE IF NOT EXISTS listas_espera_ss_trimestre (
     -- Calculada en ingesta: promedio - mediana
     -- Antigüedad extrema (tramos independientes, calculados en registros)
     reg_24a36m BIGINT,
-    -- M7: BIGINT  →  registros 24–36 meses
     reg_mayor_36m BIGINT,
-    -- M7: BIGINT  →  registros >36 meses
     -- Trazabilidad
     fuente TEXT,
     observaciones TEXT,
@@ -46,7 +44,6 @@ CREATE TABLE IF NOT EXISTS personas_nacional_trimestre (
     trimestre TEXT NOT NULL,
     tipo_prestacion TEXT NOT NULL,
     personas_total BIGINT,
-    -- M7: BIGINT (era NUMERIC(10,0))
     ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
