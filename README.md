@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **🔗 Dashboard interactivo:** [Ver en Power BI Service](https://app.powerbi.com/view?r=eyJrIjoiNDFhZDFlMWYtYzhkMC00NjRjLWIzNzItMGY1MWEyNDUwZmE5IiwidCI6IjZmZDQ4ZjQxLWFmODEtNDVhNS05YzFlLWUzOTkwYmMyN2U3YyIsImMiOjR9)
-&nbsp;&nbsp;**📄 Reporte completo:** [Análisis Longitudinal — Mayo 2026 (PDF)]([Reporte_Mayo_2026.pdf](https://zenodo.org/records/20635073))
+&nbsp;&nbsp;**📄 Reporte completo:** [Análisis Longitudinal — Mayo 2026](https://zenodo.org/records/20635073)
 
 ---
 
